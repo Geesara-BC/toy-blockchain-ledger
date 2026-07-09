@@ -62,12 +62,12 @@ func (cli *CLI) Run() {
 		cli.printHeader()
 		cli.printMenu(len(bc.PendingTransactions))
 
-		fmt.Print(Bold + Cyan + "Choose an option (1-7): " + Reset)
+		fmt.Print(Bold + Cyan + "Choose an option (1-8): " + Reset)
 		var choice int
 		_, fmtScanErr := fmt.Scanln(&choice)
 
 		if fmtScanErr != nil {
-			fmt.Println(Red + "Invalid input! Please enter a number between 1 and 7.\n" + Reset)
+			fmt.Println(Red + "Invalid input! Please enter a number between 1 and 8.\n" + Reset)
 			cli.waitForUser()
 			continue
 		}
@@ -182,11 +182,24 @@ func (cli *CLI) Run() {
 			}
 
 		case 7:
+
+			fmt.Println(Blue + "=== Pending Transaction Pool ===" + Reset)
+			if len(bc.PendingTransactions) == 0 {
+				fmt.Println("  No pending transactions in the pool.")
+			} else {
+				for i, tx := range bc.PendingTransactions {
+					fmt.Printf("  %d: [%s -> %s : %.2f Coins]\n", i+1, tx.Sender, tx.Recipient, tx.Amount)
+				}
+			}
+			fmt.Println(Blue + strings.Repeat("=", 32) + Reset)
+
+		case 8:
+
 			fmt.Println(Green + "Thank you for using Toy Blockchain! Securing database and shutting down..." + Reset)
 			os.Exit(0)
 
 		default:
-			fmt.Println(Red + "Invalid choice! Please select an option between 1 and 7." + Reset)
+			fmt.Println(Red + "Invalid choice! Please select an option between 1 and 8." + Reset)
 		}
 
 		cli.waitForUser()
@@ -209,7 +222,8 @@ func (cli *CLI) printMenu(poolSize int) {
 	fmt.Printf("  %s[4]%s View Everyone's Account Balances\n", Bold+Green, Reset)
 	fmt.Printf("  %s[5]%s Audit Full Blockchain History (Print)\n", Bold+Green, Reset)
 	fmt.Printf("  %s[6]%s Verify and Validate Blockchain Integrity\n", Bold+Cyan, Reset)
-	fmt.Printf("  %s[7]%s Save & Exit Application\n", Bold+Red, Reset)
+	fmt.Printf("  %s[7]%s View Pending Transaction Pool\n", Bold+Purple, Reset)
+	fmt.Printf("  %s[8]%s Save & Exit Application\n", Bold+Red, Reset)
 	fmt.Println()
 }
 

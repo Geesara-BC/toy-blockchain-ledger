@@ -96,6 +96,11 @@
       "sender": "yohani",
       "recipient": "geesara",
       "amount": 100
+    },
+    {
+      "sender": "FAUCET",
+      "recipient": "kumara",
+      "amount": 300
     }
   ]
 }
