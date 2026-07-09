@@ -8,6 +8,7 @@ import (
 	"toy-blockchain/internal/block"
 	"toy-blockchain/internal/chain"
 	"toy-blockchain/internal/ledger"
+	"toy-blockchain/internal/storage"
 )
 
 const (
@@ -41,14 +42,14 @@ func (cli *CLI) Run() {
 	var err error
 
 	if _, err = os.Stat(cli.dbFile); err == nil {
-		bc, err = chain.LoadFromFile(cli.dbFile)
+		bc, err = storage.LoadFromFile(cli.dbFile)
 		if err != nil {
 			fmt.Printf(Red+"Error loading blockchain: %v\n"+Reset, err)
 			os.Exit(1)
 		}
 	} else {
 		bc = chain.NewBlockchain(cli.difficulty)
-		err = bc.SaveToFile(cli.dbFile)
+		err = storage.SaveToFile(cli.dbFile, bc)
 		if err != nil {
 			fmt.Printf(Red+"Error initializing blockchain file: %v\n"+Reset, err)
 			os.Exit(1)
@@ -91,7 +92,7 @@ func (cli *CLI) Run() {
 
 			tx := block.Transaction{Sender: "FAUCET", Recipient: to, Amount: amount}
 			bc.AddTransaction(tx)
-			bc.SaveToFile(cli.dbFile)
+			storage.SaveToFile(cli.dbFile, bc)
 			fmt.Println(Green + "SUCCESS: Faucet transaction added to the pending pool!" + Reset)
 
 		case 2:
@@ -120,7 +121,7 @@ func (cli *CLI) Run() {
 			}
 
 			bc.AddTransaction(tx)
-			bc.SaveToFile(cli.dbFile)
+			storage.SaveToFile(cli.dbFile, bc)
 			fmt.Println(Green + "SUCCESS: Transaction added to the pending pool!" + Reset)
 
 		case 3:
@@ -135,7 +136,7 @@ func (cli *CLI) Run() {
 				continue
 			}
 
-			bc.SaveToFile(cli.dbFile)
+			storage.SaveToFile(cli.dbFile, bc)
 			fmt.Println(Green + "SUCCESS: Block successfully mined and committed to the ledger!" + Reset)
 			fmt.Printf("Time Taken: %v | Nonce: %d\n", duration, newBlock.Nonce)
 			fmt.Printf("Block Hash: %s%s%s\n", Yellow, newBlock.Hash, Reset)
