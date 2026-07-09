@@ -23,11 +23,17 @@ const (
 )
 
 type CLI struct {
-	dbFile string
+	dbFile       string
+	difficulty   int
+	maxBlockSize int
 }
 
-func NewCLI(dbFile string) *CLI {
-	return &CLI{dbFile: dbFile}
+func NewCLI(dbFile string, difficulty int, maxBlockSize int) *CLI {
+	return &CLI{
+		dbFile:       dbFile,
+		difficulty:   difficulty,
+		maxBlockSize: maxBlockSize,
+	}
 }
 
 func (cli *CLI) Run() {
@@ -41,7 +47,7 @@ func (cli *CLI) Run() {
 			os.Exit(1)
 		}
 	} else {
-		bc = chain.NewBlockchain(3)
+		bc = chain.NewBlockchain(cli.difficulty)
 		err = bc.SaveToFile(cli.dbFile)
 		if err != nil {
 			fmt.Printf(Red+"Error initializing blockchain file: %v\n"+Reset, err)
@@ -120,7 +126,7 @@ func (cli *CLI) Run() {
 		case 3:
 			fmt.Println(Yellow + "Mining pending transactions into a new block... Please wait..." + Reset)
 			startTime := time.Now()
-			newBlock, err := bc.MinePendingTransactions()
+			newBlock, err := bc.MinePendingTransactions(cli.maxBlockSize)
 			duration := time.Since(startTime)
 
 			if err != nil {

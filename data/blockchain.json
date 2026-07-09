@@ -7,8 +7,76 @@
       "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
       "nonce": 0,
       "hash": "d71164d1b4c4ed319081bc1731b6c4c72de81f46b85cc697b9aa87d0d1528d42"
+    },
+    {
+      "index": 1,
+      "timestamp": 1783569003,
+      "transactions": [
+        {
+          "sender": "FAUCET",
+          "recipient": "geesara",
+          "amount": 200
+        }
+      ],
+      "previous_hash": "d71164d1b4c4ed319081bc1731b6c4c72de81f46b85cc697b9aa87d0d1528d42",
+      "nonce": 3872,
+      "hash": "0000de94a61187fe2ebbbaff766ac70bf3e823d733ae1b9a953ec0dc77aa002f"
+    },
+    {
+      "index": 2,
+      "timestamp": 1783576746,
+      "transactions": [
+        {
+          "sender": "FAUCET",
+          "recipient": "ravindu",
+          "amount": 100
+        },
+        {
+          "sender": "FAUCET",
+          "recipient": "supun",
+          "amount": 100
+        },
+        {
+          "sender": "FAUCET",
+          "recipient": "hansadi",
+          "amount": 100
+        },
+        {
+          "sender": "FAUCET",
+          "recipient": "ruwan",
+          "amount": 100
+        },
+        {
+          "sender": "FAUCET",
+          "recipient": "pawan",
+          "amount": 1
+        }
+      ],
+      "previous_hash": "0000de94a61187fe2ebbbaff766ac70bf3e823d733ae1b9a953ec0dc77aa002f",
+      "nonce": 5550,
+      "hash": "000d94e12176a204cb825146cf7e22dbd15ad10c488473acf54c7795d1a69197"
+    },
+    {
+      "index": 3,
+      "timestamp": 1783576921,
+      "transactions": [
+        {
+          "sender": "FAUCET",
+          "recipient": "pasindu",
+          "amount": 100
+        }
+      ],
+      "previous_hash": "000d94e12176a204cb825146cf7e22dbd15ad10c488473acf54c7795d1a69197",
+      "nonce": 3229,
+      "hash": "000eceb434fa53f0fba582dfd0cf79f514133e58a12b8dc85c8cf111ed0e1e56"
     }
   ],
   "difficulty": 3,
-  "pending_transactions": []
+  "pending_transactions": [
+    {
+      "sender": "FAUCET",
+      "recipient": "yasara",
+      "amount": 100
+    }
+  ]
 }

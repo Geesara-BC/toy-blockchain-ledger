@@ -1,0 +1,1 @@
+PS C:\Users\Geesara\Desktop\Blockchain Project\toy-blockchain\cmd\toy-blockchain> go run main.go --difficulty 3 --max-block-size 1

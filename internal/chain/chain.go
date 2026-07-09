@@ -31,17 +31,23 @@ func (bc *Blockchain) AddTransaction(tx block.Transaction) {
 	bc.PendingTransactions = append(bc.PendingTransactions, tx)
 }
 
-func (bc *Blockchain) MinePendingTransactions() (*block.Block, error) {
+func (bc *Blockchain) MinePendingTransactions(maxBlockSize int) (*block.Block, error) {
 	if len(bc.PendingTransactions) == 0 {
 		return nil, errors.New("no pending transactions to mine")
 	}
+	txCount := len(bc.PendingTransactions)
+	if txCount > maxBlockSize {
+		txCount = maxBlockSize
+	}
+
+	transactionsToMine := bc.PendingTransactions[:txCount]
 
 	latestBlock := bc.GetLatestBlock()
 
 	newBlock := &block.Block{
 		Index:        latestBlock.Index + 1,
 		Timestamp:    time.Now().Unix(),
-		Transactions: bc.PendingTransactions,
+		Transactions: transactionsToMine,
 		PreviousHash: latestBlock.Hash,
 		Nonce:        0,
 	}
@@ -57,7 +63,7 @@ func (bc *Blockchain) MinePendingTransactions() (*block.Block, error) {
 	}
 
 	bc.Blocks = append(bc.Blocks, newBlock)
-	bc.PendingTransactions = []block.Transaction{}
+	bc.PendingTransactions = bc.PendingTransactions[txCount:]
 	return newBlock, nil
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,15 +16,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	var dbPath string
-
+	var defaultDbPath string
 	if filepath.Base(cwd) == "toy-blockchain" && filepath.Base(filepath.Dir(cwd)) == "cmd" {
 		rootPath := filepath.Dir(filepath.Dir(cwd))
-		dbPath = filepath.Join(rootPath, "data", "blockchain.json")
+		defaultDbPath = filepath.Join(rootPath, "data", "blockchain.json")
 	} else {
-		dbPath = filepath.Join(cwd, "data", "blockchain.json")
+		defaultDbPath = filepath.Join(cwd, "data", "blockchain.json")
 	}
 
-	c := cli.NewCLI(dbPath)
+	dbPath := flag.String("db-path", defaultDbPath, "File path for the blockchain database")
+	difficulty := flag.Int("difficulty", 3, "Mining difficulty (number of leading zeroes)")
+	maxBlockSize := flag.Int("max-block-size", 5, "Maximum transactions per block")
+
+	flag.Parse()
+
+	c := cli.NewCLI(*dbPath, *difficulty, *maxBlockSize)
 	c.Run()
 }
