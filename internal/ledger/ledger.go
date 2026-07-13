@@ -4,6 +4,7 @@ import (
 	"errors"
 	"toy-blockchain/internal/block"
 	"toy-blockchain/internal/chain"
+	"toy-blockchain/internal/wallet"
 )
 
 type Ledger struct {
@@ -43,6 +44,14 @@ func (l *Ledger) VerifyTransaction(tx block.Transaction) error {
 
 	if tx.Sender == "COINBASE" || tx.Sender == "FAUCET" {
 		return nil
+	}
+
+	if tx.Sender != tx.PublicKey {
+		return errors.New("UNAUTHORIZED: Sender address does not match the provided Public Key")
+	}
+
+	if !wallet.Verify(tx.PublicKey, tx.Payload(), tx.Signature) {
+		return errors.New("INVALID SIGNATURE: Transaction tampered or unauthorized")
 	}
 
 	currentBalance := l.GetBalance(tx.Sender)

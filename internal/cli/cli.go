@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"toy-blockchain/internal/chain"
 	"toy-blockchain/internal/ledger"
 	"toy-blockchain/internal/storage"
+	"toy-blockchain/internal/wallet"
 )
 
 const (
@@ -58,16 +60,18 @@ func (cli *CLI) Run() {
 
 	l := ledger.NewLedger(bc)
 
+	addressBook, privateKeys := loadWallets()
+
 	for {
 		cli.printHeader()
 		cli.printMenu(len(bc.PendingTransactions))
 
-		fmt.Print(Bold + Cyan + "Choose an option (1-8): " + Reset)
+		fmt.Print(Bold + Cyan + "Choose an option (1-9): " + Reset)
 		var choice int
 		_, fmtScanErr := fmt.Scanln(&choice)
 
 		if fmtScanErr != nil {
-			fmt.Println(Red + "Invalid input! Please enter a number between 1 and 8.\n" + Reset)
+			fmt.Println(Red + "Invalid input! Please enter a number between 1 and 9.\n" + Reset)
 			cli.waitForUser()
 			continue
 		}
@@ -75,7 +79,26 @@ func (cli *CLI) Run() {
 		fmt.Println()
 
 		switch choice {
+
 		case 1:
+			var name string
+			fmt.Print("Enter a Name for this Wallet (e.g., Janindu): ")
+			fmt.Scanln(&name)
+
+			fmt.Println(Yellow + "Generating a secure cryptographic key pair..." + Reset)
+			privKey, pubKey, err := wallet.GenerateKeyPair()
+			if err != nil {
+				fmt.Println(Red + "Error generating keys!" + Reset)
+				continue
+			}
+
+			addressBook[name] = pubKey
+			privateKeys[name] = privKey
+
+			saveWallets(addressBook, privateKeys)
+
+			fmt.Printf(Green+"SUCCESS! Wallet created and securely saved for '%s'.\n"+Reset, name)
+		case 2:
 			var to string
 			var amount float64
 
@@ -84,20 +107,35 @@ func (cli *CLI) Run() {
 			fmt.Print("Enter Amount of Free Coins Needed: ")
 			_, err := fmt.Scanln(&amount)
 
-			if to == "" || err != nil || amount <= 0 {
-				fmt.Println(Red + "Error: Invalid name or amount!" + Reset)
+			pubKey, exists := addressBook[to]
+			if !exists {
+				fmt.Println(Red + "Error: Account name not found! Please Create a Wallet first (Option 1)." + Reset)
 				cli.waitForUser()
 				continue
 			}
 
-			tx := block.Transaction{Sender: "FAUCET", Recipient: to, Amount: amount}
+			if err != nil || amount <= 0 {
+				fmt.Println(Red + "Error: Invalid amount!" + Reset)
+				cli.waitForUser()
+				continue
+			}
+
+			tx := block.Transaction{
+				Sender:    "FAUCET",
+				Recipient: pubKey,
+				Amount:    amount,
+				PublicKey: "SYSTEM_FAUCET_PUBLIC_KEY",
+				Signature: "SYSTEM_AUTHORIZED_NO_SIGNATURE",
+			}
+
 			bc.AddTransaction(tx)
 			storage.SaveToFile(cli.dbFile, bc)
 			fmt.Println(Green + "SUCCESS: Faucet transaction added to the pending pool!" + Reset)
 
-		case 2:
+		case 3:
 			var from, to string
 			var amount float64
+			var privKey string
 
 			fmt.Print("Enter Sender Name (From): ")
 			fmt.Scanln(&from)
@@ -106,13 +144,45 @@ func (cli *CLI) Run() {
 			fmt.Print("Enter Amount to Send: ")
 			_, err := fmt.Scanln(&amount)
 
-			if from == "" || to == "" || err != nil || amount <= 0 {
-				fmt.Println(Red + "Error: Invalid accounts or amount!" + Reset)
+			// if from == "" || to == "" || err != nil || amount <= 0 {
+			// 	fmt.Println(Red + "Error: Invalid accounts or amount!" + Reset)
+			// 	cli.waitForUser()
+			// 	continue
+			// }
+
+			// tx := block.Transaction{Sender: from, Recipient: to, Amount: amount}
+
+			fmt.Print("Enter your Private Key to sign the transaction: ")
+			fmt.Scanln(&privKey)
+
+			pubKeyFrom, ok1 := addressBook[from]
+			pubKeyTo, ok2 := addressBook[to]
+
+			if !ok1 || !ok2 {
+				fmt.Println(Red + "Error: Sender or Recipient not found in your local Address Book!" + Reset)
+				cli.waitForUser()
+				continue
+			}
+			if amount <= 0 {
+				fmt.Println(Red + "Error: Amount must be > 0!" + Reset)
 				cli.waitForUser()
 				continue
 			}
 
-			tx := block.Transaction{Sender: from, Recipient: to, Amount: amount}
+			tx := block.Transaction{
+				Sender:    pubKeyFrom,
+				Recipient: pubKeyTo,
+				Amount:    amount,
+				PublicKey: pubKeyFrom,
+			}
+
+			signature, err := wallet.Sign(privKey, tx.Payload())
+			if err != nil {
+				fmt.Println(Red + "Error signing transaction!" + Reset)
+				cli.waitForUser()
+				continue
+			}
+			tx.Signature = signature
 
 			if err := l.VerifyTransaction(tx); err != nil {
 				fmt.Printf(Red+"TRANSACTION REJECTED: %v\n"+Reset, err)
@@ -124,7 +194,7 @@ func (cli *CLI) Run() {
 			storage.SaveToFile(cli.dbFile, bc)
 			fmt.Println(Green + "SUCCESS: Transaction added to the pending pool!" + Reset)
 
-		case 3:
+		case 4:
 			fmt.Println(Yellow + "Mining pending transactions into a new block... Please wait..." + Reset)
 			startTime := time.Now()
 			newBlock, err := bc.MinePendingTransactions(cli.maxBlockSize)
@@ -141,19 +211,36 @@ func (cli *CLI) Run() {
 			fmt.Printf("Time Taken: %v | Nonce: %d\n", duration, newBlock.Nonce)
 			fmt.Printf("Block Hash: %s%s%s\n", Yellow, newBlock.Hash, Reset)
 
-		case 4:
+		case 5:
 			balances := l.GetBalances()
+
+			pubToName := make(map[string]string)
+			for name, pubKey := range addressBook {
+				pubToName[pubKey] = name
+			}
+
 			fmt.Println(Purple + "=== CURRENT ACCOUNT BALANCES ===" + Reset)
 			if len(balances) == 0 {
 				fmt.Println("  No accounts exist yet.")
 			} else {
 				for acc, bal := range balances {
-					fmt.Printf("  %-12s -> %s%.2f COINS%s\n", acc, Green, bal, Reset)
+
+					displayName := acc
+
+					if name, exists := pubToName[acc]; exists {
+						displayName = name
+					} else if len(acc) > 15 && acc != "FAUCET" {
+
+						displayName = acc[:15] + "..."
+					}
+
+					fmt.Printf("  %-15s -> %s%.2f COINS%s\n", displayName, Green, bal, Reset)
+					//new
 				}
 			}
 			fmt.Println(Purple + "=================================" + Reset)
 
-		case 5:
+		case 6:
 			fmt.Println(Blue + "=== Full Cryptographic Ledger History ===" + Reset)
 			for _, b := range bc.Blocks {
 				blockColor := Cyan
@@ -172,7 +259,7 @@ func (cli *CLI) Run() {
 				fmt.Println(strings.Repeat("-", 50))
 			}
 
-		case 6:
+		case 7:
 			fmt.Println(Yellow + "Auditing data integrity and cross-linking hashes..." + Reset)
 			isValid, faultyIndex := bc.IsValid()
 			if isValid {
@@ -181,7 +268,7 @@ func (cli *CLI) Run() {
 				fmt.Printf(Red+"CORRUPTED: Validation failed at Block #%d!\n"+Reset, faultyIndex)
 			}
 
-		case 7:
+		case 8:
 
 			fmt.Println(Blue + "=== Pending Transaction Pool ===" + Reset)
 			if len(bc.PendingTransactions) == 0 {
@@ -193,7 +280,7 @@ func (cli *CLI) Run() {
 			}
 			fmt.Println(Blue + strings.Repeat("=", 32) + Reset)
 
-		case 8:
+		case 9:
 
 			fmt.Println(Green + "Thank you for using Toy Blockchain! Securing database and shutting down..." + Reset)
 			os.Exit(0)
@@ -216,14 +303,15 @@ func (cli *CLI) printHeader() {
 
 func (cli *CLI) printMenu(poolSize int) {
 	fmt.Println(White + "\nWhat would you like to do today?" + Reset)
-	fmt.Printf("  %s[1]%s Request Free Coins (Faucet -> Pool)\n", Bold+Green, Reset)
-	fmt.Printf("  %s[2]%s Create Peer-to-Peer Transaction (-> Pool)\n", Bold+Green, Reset)
-	fmt.Printf("  %s[3]%s Mine Block from Pending Pool %s[%d tx pending]%s\n", Bold+Yellow, Reset, Red, poolSize, Reset)
-	fmt.Printf("  %s[4]%s View Everyone's Account Balances\n", Bold+Green, Reset)
-	fmt.Printf("  %s[5]%s Audit Full Blockchain History (Print)\n", Bold+Green, Reset)
-	fmt.Printf("  %s[6]%s Verify and Validate Blockchain Integrity\n", Bold+Cyan, Reset)
-	fmt.Printf("  %s[7]%s View Pending Transaction Pool\n", Bold+Purple, Reset)
-	fmt.Printf("  %s[8]%s Save & Exit Application\n", Bold+Red, Reset)
+	fmt.Printf("  %s[1]%s Create a New Wallet (Saved in Address Book)\n", Bold+Purple, Reset)
+	fmt.Printf("  %s[2]%s Request Free Coins (Faucet -> Pool)\n", Bold+Green, Reset)
+	fmt.Printf("  %s[3]%s Send Coins (Auto-Signs with saved Key)\n", Bold+Green, Reset)
+	fmt.Printf("  %s[4]%s Mine Block from Pending Pool %s[%d tx pending]%s\n", Bold+Yellow, Reset, Red, poolSize, Reset)
+	fmt.Printf("  %s[5]%s View Everyone's Account Balances\n", Bold+Green, Reset)
+	fmt.Printf("  %s[6]%s Audit Full Blockchain History (Print)\n", Bold+Green, Reset)
+	fmt.Printf("  %s[7]%s Verify and Validate Blockchain Integrity\n", Bold+Cyan, Reset)
+	fmt.Printf("  %s[8]%s View Pending Transaction Pool\n", Bold+Purple, Reset)
+	fmt.Printf("  %s[9]%s Save & Exit Application\n", Bold+Red, Reset)
 	fmt.Println()
 }
 
@@ -231,4 +319,26 @@ func (cli *CLI) waitForUser() {
 	fmt.Print(White + "\nPress [ENTER] to return to the main menu..." + Reset)
 	var discard string
 	fmt.Scanln(&discard)
+}
+
+type WalletStore struct {
+	AddressBook map[string]string `json:"address_book"`
+	PrivateKeys map[string]string `json:"private_keys"`
+}
+
+func loadWallets() (map[string]string, map[string]string) {
+	data, err := os.ReadFile("wallets.json")
+	if err != nil {
+
+		return make(map[string]string), make(map[string]string)
+	}
+	var store WalletStore
+	json.Unmarshal(data, &store)
+	return store.AddressBook, store.PrivateKeys
+}
+
+func saveWallets(addresses, privates map[string]string) {
+	store := WalletStore{AddressBook: addresses, PrivateKeys: privates}
+	data, _ := json.MarshalIndent(store, "", "  ")
+	os.WriteFile("wallets.json", data, 0644)
 }

@@ -11,6 +11,8 @@ type Transaction struct {
 	Sender    string  `json:"sender"`
 	Recipient string  `json:"recipient"`
 	Amount    float64 `json:"amount"`
+	PublicKey string  `json:"public_key"` // new
+	Signature string  `json:"signature"`  //new
 }
 
 type Block struct {
@@ -21,6 +23,13 @@ type Block struct {
 	Nonce        int           `json:"nonce"`
 	Hash         string        `json:"hash"`
 }
+
+// new func
+func (tx *Transaction) Payload() string {
+	return fmt.Sprintf("%s:%s:%f", tx.Sender, tx.Recipient, tx.Amount)
+}
+
+// new func
 
 func (b *Block) CalculateHash() string {
 	oldHash := b.Hash

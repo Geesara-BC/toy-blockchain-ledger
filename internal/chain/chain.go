@@ -11,7 +11,7 @@ import (
 type Blockchain struct {
 	Blocks              []*block.Block      `json:"blocks"`
 	Difficulty          int                 `json:"difficulty"`
-	PendingTransactions []block.Transaction `json:"pending_transactions"` // 🌟 Added Pending Pool
+	PendingTransactions []block.Transaction `json:"pending_transactions"`
 }
 
 func NewBlockchain(difficulty int) *Blockchain {
