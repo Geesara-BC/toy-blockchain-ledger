@@ -257,7 +257,7 @@ func (cli *CLI) Run() {
 
 		case 6:
 			fmt.Println(Blue + "=== Full Cryptographic Ledger History ===" + Reset)
-			for _, b := range bc.Blocks {
+			for _, b := range bc.GetBlocks() {
 				blockColor := Cyan
 				if b.Index == 0 {
 					blockColor = Purple

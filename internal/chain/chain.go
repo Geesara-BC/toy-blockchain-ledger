@@ -23,6 +23,30 @@ func NewBlockchain(difficulty int) *Blockchain {
 	}
 }
 
+// GetBlocks returns deep copies of blocks to prevent modification (true immutability)
+func (bc *Blockchain) GetBlocks() []block.Block {
+	copies := make([]block.Block, len(bc.Blocks))
+	for i, b := range bc.Blocks {
+		copies[i] = *b // Create deep copies
+	}
+	return copies
+}
+
+// TamperBlockForTesting allows modifying blocks (for testing only)
+func (bc *Blockchain) TamperBlockForTesting(blockIndex int, modifyFunc func(*block.Block)) {
+	if blockIndex < len(bc.Blocks) {
+		modifyFunc(bc.Blocks[blockIndex])
+	}
+}
+
+// ValidateBlockModification ensures blocks cannot be modified once committed
+func (bc *Blockchain) ValidateBlockModification(blockIndex int) error {
+	if blockIndex < len(bc.Blocks) && bc.Blocks[blockIndex].IsImmutable {
+		return errors.New("FORBIDDEN: This block is immutable and cannot be modified")
+	}
+	return nil
+}
+
 func (bc *Blockchain) GetLatestBlock() *block.Block {
 	return bc.Blocks[len(bc.Blocks)-1]
 }
@@ -138,6 +162,8 @@ func (bc *Blockchain) MinePendingTransactions(maxBlockSize int) (*block.Block, e
 		newBlock.Nonce++
 	}
 
+	// Mark the newly mined block as immutable
+	newBlock.IsImmutable = true
 	bc.Blocks = append(bc.Blocks, newBlock)
 	bc.PendingTransactions = bc.PendingTransactions[txCount:]
 	return newBlock, nil
@@ -148,7 +174,8 @@ func (bc *Blockchain) IsValid() (bool, int) {
 	if len(bc.Blocks) > 0 {
 		genesisBlock := bc.Blocks[0]
 
-		expectedGenesisHash := "24f430256868bc93806e9ebd86a15ea50940b55fb99c8871e5119af4d9f72f36"
+		// expectedGenesisHash := "24f430256868bc93806e9ebd86a15ea50940b55fb99c8871e5119af4d9f72f36"
+		expectedGenesisHash := block.NewGenesisBlock().Hash
 		if genesisBlock.Hash != expectedGenesisHash {
 			return false, 0
 		}

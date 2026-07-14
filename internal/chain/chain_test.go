@@ -11,11 +11,11 @@ func TestGenesisBlockInChain(t *testing.T) {
 	difficulty := 2
 	bc := NewBlockchain(difficulty)
 
-	if len(bc.Blocks) != 1 {
-		t.Fatalf("Expected chain to have exactly 1 block, got %d", len(bc.Blocks))
+	if len(bc.GetBlocks()) != 1 {
+		t.Fatalf("Expected chain to have exactly 1 block, got %d", len(bc.GetBlocks()))
 	}
 
-	genesisBlock := bc.Blocks[0]
+	genesisBlock := bc.GetBlocks()[0]
 	if genesisBlock.Index != 0 {
 		t.Errorf("Expected genesis block index to be 0, got %d", genesisBlock.Index)
 	}
@@ -86,7 +86,10 @@ func TestTamperedChainDetection(t *testing.T) {
 	bc.AddTransaction(tx)
 	bc.MinePendingTransactions(5)
 
-	bc.Blocks[1].Transactions[0].Amount = 500
+	// Use TamperBlockForTesting to modify block for testing immutability detection
+	bc.TamperBlockForTesting(1, func(b *block.Block) {
+		b.Transactions[0].Amount = 500
+	})
 
 	isValid, faultyIndex := bc.IsValid()
 

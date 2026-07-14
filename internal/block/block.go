@@ -22,6 +22,17 @@ type Block struct {
 	Nonce        int           `json:"nonce"`
 	Difficulty   int           `json:"difficulty"`
 	Hash         string        `json:"hash,omitempty"`
+	IsImmutable  bool          `json:"is_immutable"`
+}
+
+// blockForHash is used for hash calculation (excludes IsImmutable)
+type blockForHash struct {
+	Index        int           `json:"index"`
+	Timestamp    int64         `json:"timestamp"`
+	Transactions []Transaction `json:"transactions"`
+	PreviousHash string        `json:"previous_hash"`
+	Nonce        int           `json:"nonce"`
+	Difficulty   int           `json:"difficulty"`
 }
 
 func (tx *Transaction) Payload() string {
@@ -29,10 +40,17 @@ func (tx *Transaction) Payload() string {
 }
 
 func (b *Block) CalculateHash() string {
-	copyBlock := *b
-	copyBlock.Hash = ""
+	// Use blockForHash to exclude IsImmutable from hash calculation
+	blockHash := blockForHash{
+		Index:        b.Index,
+		Timestamp:    b.Timestamp,
+		Transactions: b.Transactions,
+		PreviousHash: b.PreviousHash,
+		Nonce:        b.Nonce,
+		Difficulty:   b.Difficulty,
+	}
 
-	blockData, err := json.Marshal(copyBlock)
+	blockData, err := json.Marshal(blockHash)
 	if err != nil {
 		return ""
 	}
@@ -49,6 +67,7 @@ func NewGenesisBlock() *Block {
 		PreviousHash: "0000000000000000000000000000000000000000000000000000000000000000",
 		Difficulty:   0,
 		Nonce:        0,
+		IsImmutable:  true,
 	}
 
 	genesisBlock.Hash = genesisBlock.CalculateHash()
