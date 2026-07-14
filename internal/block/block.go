@@ -4,15 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"time"
 )
 
 type Transaction struct {
-	Sender    string  `json:"sender"`
-	Recipient string  `json:"recipient"`
-	Amount    float64 `json:"amount"`
-	PublicKey string  `json:"public_key"` // new
-	Signature string  `json:"signature"`  //new
+	Sender    string `json:"sender"`
+	Recipient string `json:"recipient"`
+	Amount    int64  `json:"amount"`
+	PublicKey string `json:"public_key"`
+	Signature string `json:"signature"`
 }
 
 type Block struct {
@@ -21,26 +20,22 @@ type Block struct {
 	Transactions []Transaction `json:"transactions"`
 	PreviousHash string        `json:"previous_hash"`
 	Nonce        int           `json:"nonce"`
-	Hash         string        `json:"hash"`
+	Difficulty   int           `json:"difficulty"`
+	Hash         string        `json:"hash,omitempty"`
 }
 
-// new func
 func (tx *Transaction) Payload() string {
-	return fmt.Sprintf("%s:%s:%f", tx.Sender, tx.Recipient, tx.Amount)
+	return fmt.Sprintf("%s:%s:%d", tx.Sender, tx.Recipient, tx.Amount)
 }
-
-// new func
 
 func (b *Block) CalculateHash() string {
-	oldHash := b.Hash
-	b.Hash = ""
+	copyBlock := *b
+	copyBlock.Hash = ""
 
-	blockData, err := json.Marshal(b)
+	blockData, err := json.Marshal(copyBlock)
 	if err != nil {
 		return ""
 	}
-
-	b.Hash = oldHash
 
 	hashBytes := sha256.Sum256(blockData)
 	return fmt.Sprintf("%x", hashBytes)
@@ -49,9 +44,10 @@ func (b *Block) CalculateHash() string {
 func NewGenesisBlock() *Block {
 	genesisBlock := &Block{
 		Index:        0,
-		Timestamp:    time.Now().Unix(),
+		Timestamp:    0,
 		Transactions: []Transaction{},
 		PreviousHash: "0000000000000000000000000000000000000000000000000000000000000000",
+		Difficulty:   0,
 		Nonce:        0,
 	}
 

@@ -2,92 +2,65 @@
   "blocks": [
     {
       "index": 0,
-      "timestamp": 1783663167,
+      "timestamp": 0,
       "transactions": [],
       "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
       "nonce": 0,
-      "hash": "df719a2f47eaced276a24eaa2afa6416402d322edef952cc788ffceb8ae4d54d"
+      "difficulty": 0,
+      "hash": "24f430256868bc93806e9ebd86a15ea50940b55fb99c8871e5119af4d9f72f36"
     },
     {
       "index": 1,
-      "timestamp": 1783663215,
+      "timestamp": 1784009949,
       "transactions": [
         {
           "sender": "FAUCET",
-          "recipient": "7eb57fd1206f728063f208eeb60ce5c5351cc326764e9846eccb086b154b6527",
+          "recipient": "e414d7e79a7819dd9cb0c30ef63a9049f55081c99e35cce4aab2b0a818c9f11d",
           "amount": 200,
           "public_key": "SYSTEM_FAUCET_PUBLIC_KEY",
           "signature": "SYSTEM_AUTHORIZED_NO_SIGNATURE"
         }
       ],
-      "previous_hash": "df719a2f47eaced276a24eaa2afa6416402d322edef952cc788ffceb8ae4d54d",
-      "nonce": 4900,
-      "hash": "000b57891f6f7e4cf334eb0c6f24c71a24e0cafd20a65def96ca3a9f0fa66cde"
+      "previous_hash": "24f430256868bc93806e9ebd86a15ea50940b55fb99c8871e5119af4d9f72f36",
+      "nonce": 1145,
+      "difficulty": 3,
+      "hash": "00032704a3f7a9d8d413487b23beb7a4ae6ac3e7d650b1b38dcda49e2262a7c8"
     },
     {
       "index": 2,
-      "timestamp": 1783663292,
+      "timestamp": 1784020228,
       "transactions": [
         {
           "sender": "FAUCET",
-          "recipient": "9cbecb39b391f32c37a1a8c1c2ab387b6d734c08c76848883a92c3d434e91255",
-          "amount": 400,
+          "recipient": "c570cec6f4de4cd1bb1722b45392b6c2f2ec951761e7c1f57002bbd664201839",
+          "amount": 300,
           "public_key": "SYSTEM_FAUCET_PUBLIC_KEY",
           "signature": "SYSTEM_AUTHORIZED_NO_SIGNATURE"
-        },
-        {
-          "sender": "7eb57fd1206f728063f208eeb60ce5c5351cc326764e9846eccb086b154b6527",
-          "recipient": "9cbecb39b391f32c37a1a8c1c2ab387b6d734c08c76848883a92c3d434e91255",
-          "amount": 50,
-          "public_key": "7eb57fd1206f728063f208eeb60ce5c5351cc326764e9846eccb086b154b6527",
-          "signature": "6b1be04bb3b5f73040577574bc74d2b371549b378fcb5b1089e5bc97e5f5f9924886cb78dbc73c7b7ead1bebb9fa02b008316611e5375937aa200206a6574200"
         }
       ],
-      "previous_hash": "000b57891f6f7e4cf334eb0c6f24c71a24e0cafd20a65def96ca3a9f0fa66cde",
-      "nonce": 2166,
-      "hash": "000462fb3f02364033a8e2ead64ccdad21acc6a68dad89788415f01f9cf60ac0"
+      "previous_hash": "00032704a3f7a9d8d413487b23beb7a4ae6ac3e7d650b1b38dcda49e2262a7c8",
+      "nonce": 307,
+      "difficulty": 3,
+      "hash": "000a0bec6f68158bb088716a3d5c766a60c28928ce99da25be70539f79d75f8f"
     },
     {
       "index": 3,
-      "timestamp": 1783663670,
+      "timestamp": 1784020250,
       "transactions": [
         {
-          "sender": "FAUCET",
-          "recipient": "26198944c8583abd51a57da8adf09a3971abc9d4bb16545f529acf123282ae52",
-          "amount": 400,
-          "public_key": "SYSTEM_FAUCET_PUBLIC_KEY",
-          "signature": "SYSTEM_AUTHORIZED_NO_SIGNATURE"
+          "sender": "c570cec6f4de4cd1bb1722b45392b6c2f2ec951761e7c1f57002bbd664201839",
+          "recipient": "e414d7e79a7819dd9cb0c30ef63a9049f55081c99e35cce4aab2b0a818c9f11d",
+          "amount": 100,
+          "public_key": "c570cec6f4de4cd1bb1722b45392b6c2f2ec951761e7c1f57002bbd664201839",
+          "signature": "5ed15ad6cb0d8fb3e8a3fe949ac326a454d0029a6165c8157ba30e3d40824a3b19d2b5fc3bd9d0f05c721f90624f5611dd236e1174580d4045b8beb97f1f1e05"
         }
       ],
-      "previous_hash": "000462fb3f02364033a8e2ead64ccdad21acc6a68dad89788415f01f9cf60ac0",
-      "nonce": 9228,
-      "hash": "000e88b51e00478c1c655d7c6e43d2fb9b5fcd9e6b534ebbfa8d508bff20c04b"
-    },
-    {
-      "index": 4,
-      "timestamp": 1783663719,
-      "transactions": [
-        {
-          "sender": "26198944c8583abd51a57da8adf09a3971abc9d4bb16545f529acf123282ae52",
-          "recipient": "7eb57fd1206f728063f208eeb60ce5c5351cc326764e9846eccb086b154b6527",
-          "amount": 50,
-          "public_key": "26198944c8583abd51a57da8adf09a3971abc9d4bb16545f529acf123282ae52",
-          "signature": "92dddeaffb228b6d6b46091e1db067aa8387a9efe4cdbaae326569c2dcca68c84804a67ed31543b5ccec1a91911b9ea437302e5fe5f2ed5c9d2718afec6ec80c"
-        }
-      ],
-      "previous_hash": "000e88b51e00478c1c655d7c6e43d2fb9b5fcd9e6b534ebbfa8d508bff20c04b",
-      "nonce": 6105,
-      "hash": "0006e096b87bbaefbf6e60f52947f3ff7a93dcbf89f4a5a2bbe880832fbdbfb5"
+      "previous_hash": "000a0bec6f68158bb088716a3d5c766a60c28928ce99da25be70539f79d75f8f",
+      "nonce": 3310,
+      "difficulty": 3,
+      "hash": "000e91ede951b4704d336017349d4f27a482fbe6f378c1a17e4584369222f7ee"
     }
   ],
   "difficulty": 3,
-  "pending_transactions": [
-    {
-      "sender": "26198944c8583abd51a57da8adf09a3971abc9d4bb16545f529acf123282ae52",
-      "recipient": "7eb57fd1206f728063f208eeb60ce5c5351cc326764e9846eccb086b154b6527",
-      "amount": 10,
-      "public_key": "26198944c8583abd51a57da8adf09a3971abc9d4bb16545f529acf123282ae52",
-      "signature": "f4bb81f7f20fd99e6bfe34a260d9fc79720a025ea7170124a073d4183a26194924ad8a50f04afe2c8bed6036221d50dbe96d6395857ba1c733589f6f2339fc0d"
-    }
-  ]
+  "pending_transactions": []
 }

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"toy-blockchain/internal/block"
+	"toy-blockchain/internal/wallet"
 )
 
 func TestGenesisBlockInChain(t *testing.T) {
@@ -47,24 +48,42 @@ func TestMinedBlockDifficulty(t *testing.T) {
 }
 
 func TestHonestChainValidation(t *testing.T) {
-	bc := NewBlockchain(1)
-	bc.AddTransaction(block.Transaction{Sender: "FAUCET", Recipient: "Alice", Amount: 50})
+	bc := NewBlockchain(3)
+
+	err1 := bc.AddTransaction(block.Transaction{Sender: "FAUCET", Recipient: "Alice", Amount: 50})
+	if err1 != nil {
+		t.Fatalf("Faucet transaction failed: %v", err1)
+	}
 	bc.MinePendingTransactions(5)
-	bc.AddTransaction(block.Transaction{Sender: "Alice", Recipient: "Bob", Amount: 10})
-	bc.MinePendingTransactions(5)
+
+	tx := block.Transaction{Sender: "Alice", Recipient: "Bob", Amount: 10}
+	err2 := bc.AddTransaction(tx)
+
+	expectedErr := "UNAUTHORIZED: Transaction must be signed with a valid public key and signature"
+
+	if err2 == nil {
+		t.Errorf("Test failed: An unsigned transaction was incorrectly accepted!")
+	} else if err2.Error() != expectedErr {
+		t.Errorf("Test failed: Expected error '%s', but got: %v", expectedErr, err2)
+	}
 
 	isValid, _ := bc.IsValid()
-
 	if !isValid {
-		t.Errorf("Expected an honest chain to validate successfully, but it failed")
+		t.Errorf("Test failed: Chain should be valid even after a rejected transaction attempt")
 	}
 }
-
 func TestTamperedChainDetection(t *testing.T) {
-	bc := NewBlockchain(1)
+	bc := NewBlockchain(3)
+
 	bc.AddTransaction(block.Transaction{Sender: "FAUCET", Recipient: "Alice", Amount: 100})
 	bc.MinePendingTransactions(5)
-	bc.AddTransaction(block.Transaction{Sender: "Alice", Recipient: "Bob", Amount: 20})
+
+	priv, pub, _ := wallet.GenerateKeyPair()
+	tx := block.Transaction{Sender: pub, Recipient: "Bob", Amount: 20, PublicKey: pub}
+	sig, _ := wallet.Sign(priv, tx.Payload())
+	tx.Signature = sig
+
+	bc.AddTransaction(tx)
 	bc.MinePendingTransactions(5)
 
 	bc.Blocks[1].Transactions[0].Amount = 500
@@ -72,10 +91,10 @@ func TestTamperedChainDetection(t *testing.T) {
 	isValid, faultyIndex := bc.IsValid()
 
 	if isValid {
-		t.Errorf("Expected tampered chain to fail validation, but it passed")
+		t.Errorf("Security Test Failed: Tampered chain was incorrectly marked as valid!")
 	}
 
 	if faultyIndex != 1 {
-		t.Errorf("Expected validation to identify block index 1 as faulty, got %d", faultyIndex)
+		t.Errorf("Security Test Failed: Expected failure at block index 1, but got %d", faultyIndex)
 	}
 }

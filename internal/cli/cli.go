@@ -100,7 +100,7 @@ func (cli *CLI) Run() {
 			fmt.Printf(Green+"SUCCESS! Wallet created and securely saved for '%s'.\n"+Reset, name)
 		case 2:
 			var to string
-			var amount float64
+			var amount int64
 
 			fmt.Print("Enter Your Name / Account Name: ")
 			fmt.Scanln(&to)
@@ -128,13 +128,22 @@ func (cli *CLI) Run() {
 				Signature: "SYSTEM_AUTHORIZED_NO_SIGNATURE",
 			}
 
-			bc.AddTransaction(tx)
-			storage.SaveToFile(cli.dbFile, bc)
+			if err := bc.AddTransaction(tx); err != nil {
+				fmt.Printf(Red+"TRANSACTION REJECTED: %v\n"+Reset, err)
+				cli.waitForUser()
+				continue
+			}
+
+			if err := storage.SaveToFile(cli.dbFile, bc); err != nil {
+				fmt.Printf(Red+"Error saving blockchain: %v\n"+Reset, err)
+				cli.waitForUser()
+				continue
+			}
 			fmt.Println(Green + "SUCCESS: Faucet transaction added to the pending pool!" + Reset)
 
 		case 3:
 			var from, to string
-			var amount float64
+			var amount int64
 			var privKey string
 
 			fmt.Print("Enter Sender Name (From): ")
@@ -163,12 +172,11 @@ func (cli *CLI) Run() {
 				cli.waitForUser()
 				continue
 			}
-			if amount <= 0 {
-				fmt.Println(Red + "Error: Amount must be > 0!" + Reset)
+			if from == "" || to == "" || err != nil || amount <= 0 {
+				fmt.Println(Red + "Error: Invalid accounts or amount!" + Reset)
 				cli.waitForUser()
 				continue
 			}
-
 			tx := block.Transaction{
 				Sender:    pubKeyFrom,
 				Recipient: pubKeyTo,
@@ -184,14 +192,17 @@ func (cli *CLI) Run() {
 			}
 			tx.Signature = signature
 
-			if err := l.VerifyTransaction(tx); err != nil {
+			if err := bc.AddTransaction(tx); err != nil {
 				fmt.Printf(Red+"TRANSACTION REJECTED: %v\n"+Reset, err)
 				cli.waitForUser()
 				continue
 			}
 
-			bc.AddTransaction(tx)
-			storage.SaveToFile(cli.dbFile, bc)
+			if err := storage.SaveToFile(cli.dbFile, bc); err != nil {
+				fmt.Printf(Red+"Error saving blockchain: %v\n"+Reset, err)
+				cli.waitForUser()
+				continue
+			}
 			fmt.Println(Green + "SUCCESS: Transaction added to the pending pool!" + Reset)
 
 		case 4:
@@ -206,7 +217,11 @@ func (cli *CLI) Run() {
 				continue
 			}
 
-			storage.SaveToFile(cli.dbFile, bc)
+			if err := storage.SaveToFile(cli.dbFile, bc); err != nil {
+				fmt.Printf(Red+"Error saving blockchain: %v\n"+Reset, err)
+				cli.waitForUser()
+				continue
+			}
 			fmt.Println(Green + "SUCCESS: Block successfully mined and committed to the ledger!" + Reset)
 			fmt.Printf("Time Taken: %v | Nonce: %d\n", duration, newBlock.Nonce)
 			fmt.Printf("Block Hash: %s%s%s\n", Yellow, newBlock.Hash, Reset)
@@ -234,7 +249,7 @@ func (cli *CLI) Run() {
 						displayName = acc[:15] + "..."
 					}
 
-					fmt.Printf("  %-15s -> %s%.2f COINS%s\n", displayName, Green, bal, Reset)
+					fmt.Printf("  %-15s -> %s%.2f COINS%s\n", displayName, Green, float64(bal), Reset)
 					//new
 				}
 			}
@@ -254,7 +269,7 @@ func (cli *CLI) Run() {
 					fmt.Println("      [Genesis Block - System Initialized]")
 				}
 				for _, tx := range b.Transactions {
-					fmt.Printf("      [%s -> %s : %.2f Coins]\n", tx.Sender, tx.Recipient, tx.Amount)
+					fmt.Printf("      [%s -> %s : %.2f Coins]\n", tx.Sender, tx.Recipient, float64(tx.Amount))
 				}
 				fmt.Println(strings.Repeat("-", 50))
 			}
@@ -275,7 +290,7 @@ func (cli *CLI) Run() {
 				fmt.Println("  No pending transactions in the pool.")
 			} else {
 				for i, tx := range bc.PendingTransactions {
-					fmt.Printf("  %d: [%s -> %s : %.2f Coins]\n", i+1, tx.Sender, tx.Recipient, tx.Amount)
+					fmt.Printf("  %d: [%s -> %s : %.2f Coins]\n", i+1, tx.Sender, tx.Recipient, float64(tx.Amount))
 				}
 			}
 			fmt.Println(Blue + strings.Repeat("=", 32) + Reset)

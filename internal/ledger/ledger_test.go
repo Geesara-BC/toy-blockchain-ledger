@@ -4,6 +4,7 @@ import (
 	"testing"
 	"toy-blockchain/internal/block"
 	"toy-blockchain/internal/chain"
+	"toy-blockchain/internal/wallet"
 )
 
 func TestOverspendingTransactionRejected(t *testing.T) {
@@ -15,19 +16,32 @@ func TestOverspendingTransactionRejected(t *testing.T) {
 
 	initialBalance := l.GetBalance("Alice")
 	if initialBalance != 100 {
-		t.Fatalf("Expected Alice to have balance 100, got %f", initialBalance)
+		t.Fatalf("Expected Alice to have balance 100, got %d", initialBalance)
 	}
 
-	tx := block.Transaction{Sender: "Alice", Recipient: "Bob", Amount: 150}
+	privKey, pubKey, _ := wallet.GenerateKeyPair()
+
+	tx := block.Transaction{
+		Sender:    pubKey,
+		Recipient: "Bob",
+		Amount:    150,
+		PublicKey: pubKey,
+	}
+
+	sig, _ := wallet.Sign(privKey, tx.Payload())
+	tx.Signature = sig
+
 	err := l.VerifyTransaction(tx)
 
 	if err == nil {
-		t.Errorf("Expected transaction to be rejected due to overspending, but got no error")
+		t.Errorf("Expected transaction to be rejected due to insufficient balance, but got no error")
+	} else if err.Error() != "insufficient balance: sender does not have enough funds" {
+		t.Errorf("Expected 'insufficient balance' error, but got: %v", err)
 	}
 
 	currentBalance := l.GetBalance("Alice")
 	if currentBalance != 100 {
-		t.Errorf("Expected account balance to remain 100, got %f", currentBalance)
+		t.Errorf("Expected account balance to remain 100, got %d", currentBalance)
 	}
 }
 
@@ -35,14 +49,35 @@ func TestMalformedTransactionRejected(t *testing.T) {
 	bc := chain.NewBlockchain(1)
 	l := NewLedger(bc)
 
-	txZero := block.Transaction{Sender: "Alice", Recipient: "Bob", Amount: 0}
-	txNegative := block.Transaction{Sender: "Alice", Recipient: "Bob", Amount: -50}
+	privKey, pubKey, _ := wallet.GenerateKeyPair()
 
-	if err := l.VerifyTransaction(txZero); err == nil {
-		t.Errorf("Expected transaction with amount 0 to be rejected")
+	txZero := block.Transaction{
+		Sender:    pubKey,
+		Recipient: "Bob",
+		Amount:    0,
+		PublicKey: pubKey,
+	}
+	sigZero, _ := wallet.Sign(privKey, txZero.Payload())
+	txZero.Signature = sigZero
+
+	txNegative := block.Transaction{
+		Sender:    pubKey,
+		Recipient: "Bob",
+		Amount:    -50,
+		PublicKey: pubKey,
+	}
+	sigNeg, _ := wallet.Sign(privKey, txNegative.Payload())
+	txNegative.Signature = sigNeg
+
+	expectedErr := "transaction amount must be positive"
+
+	errZero := l.VerifyTransaction(txZero)
+	if errZero == nil || errZero.Error() != expectedErr {
+		t.Errorf("Expected error '%s' for amount 0, but got: %v", expectedErr, errZero)
 	}
 
-	if err := l.VerifyTransaction(txNegative); err == nil {
-		t.Errorf("Expected transaction with negative amount to be rejected")
+	errNeg := l.VerifyTransaction(txNegative)
+	if errNeg == nil || errNeg.Error() != expectedErr {
+		t.Errorf("Expected error '%s' for negative amount, but got: %v", expectedErr, errNeg)
 	}
 }
