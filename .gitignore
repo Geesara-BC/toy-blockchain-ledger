@@ -1,0 +1,3 @@
+# Runtime data — never commit real wallets or chain state
+cmd/toy-blockchain/wallets.json
+data/blockchain.json
