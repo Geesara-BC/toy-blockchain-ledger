@@ -38,7 +38,7 @@ type blockForHash struct {
 }
 
 func (tx *Transaction) Payload() string {
-	return fmt.Sprintf("%s:%s:%d", tx.Sender, tx.Recipient, tx.Amount)
+	return fmt.Sprintf("%s:%s:%d:%d", tx.Sender, tx.Recipient, tx.Amount, tx.Fee)
 }
 
 func (b *Block) MerkleRoot() string {

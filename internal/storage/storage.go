@@ -7,6 +7,10 @@ import (
 )
 
 func SaveToFile(filename string, bc *chain.Blockchain) error {
+	if bc != nil {
+		bc.PrepareForPersistence()
+	}
+
 	data, err := json.MarshalIndent(bc, "", "  ")
 	if err != nil {
 		return err
@@ -25,6 +29,6 @@ func LoadFromFile(filename string) (*chain.Blockchain, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	bc.RehydrateForLoad()
 	return &bc, nil
 }

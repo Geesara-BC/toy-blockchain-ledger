@@ -69,3 +69,12 @@ func TestNewGenesisBlock(t *testing.T) {
 		t.Errorf("Genesis block hash is invalid or not correctly calculated")
 	}
 }
+
+func TestPayloadIncludesFee(t *testing.T) {
+	txA := Transaction{Sender: "Alice", Recipient: "Bob", Amount: 50, Fee: 5}
+	txB := Transaction{Sender: "Alice", Recipient: "Bob", Amount: 50, Fee: 10}
+
+	if txA.Payload() == txB.Payload() {
+		t.Fatalf("expected payload to change when fee changes")
+	}
+}

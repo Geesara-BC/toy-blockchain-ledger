@@ -14,16 +14,19 @@ import (
 )
 
 type Blockchain struct {
-	Blocks              []*block.Block      `json:"blocks"`
-	Difficulty          int                 `json:"difficulty"`
-	BaseDifficulty      int                 `json:"base_difficulty"`
-	DifficultyConfig    DifficultyConfig    `json:"difficulty_config"`
-	PendingTransactions []block.Transaction `json:"pending_transactions"`
-	RewardEngine        *miner.RewardEngine `json:"-"`
-	MinerRegistry       *miner.Registry     `json:"-"`
-	MinerAddress        string              `json:"miner_address"`
-	MinerWorkers        int                 `json:"miner_workers"`
-	MinerTimeout        time.Duration       `json:"miner_timeout"`
+	Blocks                 []*block.Block      `json:"blocks"`
+	Difficulty             int                 `json:"difficulty"`
+	BaseDifficulty         int                 `json:"base_difficulty"`
+	DifficultyConfig       DifficultyConfig    `json:"difficulty_config"`
+	PendingTransactions    []block.Transaction `json:"pending_transactions"`
+	RewardEngine           *miner.RewardEngine `json:"-"`
+	MinerRegistry          *miner.Registry     `json:"-"`
+	RewardAmount           int64               `json:"reward_amount"`
+	FeePerTransaction      int64               `json:"fee_per_transaction"`
+	RegisteredMinerAddress []string            `json:"registered_miners,omitempty"`
+	MinerAddress           string              `json:"miner_address"`
+	MinerWorkers           int                 `json:"miner_workers"`
+	MinerTimeout           time.Duration       `json:"miner_timeout"`
 }
 
 func NewBlockchain(difficulty int) *Blockchain {
@@ -31,19 +34,68 @@ func NewBlockchain(difficulty int) *Blockchain {
 }
 
 func NewBlockchainWithDifficultyConfig(difficulty int, config DifficultyConfig) *Blockchain {
-	return &Blockchain{
-		Blocks:              []*block.Block{block.NewGenesisBlock()},
-		Difficulty:          difficulty,
-		BaseDifficulty:      difficulty,
-		DifficultyConfig:    config,
-		PendingTransactions: []block.Transaction{},
-		RewardEngine:        miner.NewRewardEngine(50, miner.NewFixedFeePolicy(0)),
-		MinerRegistry:       miner.NewRegistry(),
-		MinerAddress:        "",
-		MinerWorkers:        0,
-		MinerTimeout:        10 * time.Second,
+	bc := &Blockchain{
+		Blocks:                 []*block.Block{block.NewGenesisBlock()},
+		Difficulty:             difficulty,
+		BaseDifficulty:         difficulty,
+		DifficultyConfig:       config,
+		PendingTransactions:    []block.Transaction{},
+		RewardAmount:           50,
+		FeePerTransaction:      0,
+		RegisteredMinerAddress: []string{},
+		MinerAddress:           "",
+		MinerWorkers:           0,
+		MinerTimeout:           10 * time.Second,
+	}
+	bc.RewardEngine = miner.NewRewardEngine(bc.RewardAmount, miner.NewFixedFeePolicy(bc.FeePerTransaction))
+	bc.MinerRegistry = miner.NewRegistry()
+	return bc
+}
+
+// new new new
+
+func (bc *Blockchain) rehydrate() {
+	if bc.RewardEngine == nil {
+		bc.RewardEngine = miner.NewRewardEngine(bc.RewardAmount, miner.NewFixedFeePolicy(bc.FeePerTransaction))
+	}
+	if bc.MinerRegistry == nil {
+		bc.MinerRegistry = miner.NewRegistry()
+	}
+	for _, address := range bc.RegisteredMinerAddress {
+		if address == "" {
+			continue
+		}
+		_ = bc.MinerRegistry.Register(address)
+	}
+	bc.RegisteredMinerAddress = bc.MinerRegistry.List()
+	if bc.MinerAddress == "" && len(bc.RegisteredMinerAddress) > 0 {
+		bc.MinerAddress = bc.RegisteredMinerAddress[0]
 	}
 }
+
+func (bc *Blockchain) syncRegisteredMiners() {
+	if bc.MinerRegistry == nil {
+		return
+	}
+	bc.RegisteredMinerAddress = bc.MinerRegistry.List()
+}
+
+func (bc *Blockchain) RehydrateForLoad() {
+	bc.rehydrate()
+}
+
+func (bc *Blockchain) PrepareForPersistence() {
+	bc.rehydrate()
+	if bc.RewardEngine != nil {
+		bc.RewardAmount = bc.RewardEngine.BlockReward
+		if feePolicy, ok := bc.RewardEngine.FeePolicy.(*miner.FixedFeePolicy); ok {
+			bc.FeePerTransaction = feePolicy.FeePerTransaction
+		}
+	}
+	bc.syncRegisteredMiners()
+}
+
+// new new new
 
 // GetBlocks returns deep copies of blocks to prevent modification (true immutability)
 func (bc *Blockchain) GetBlocks() []block.Block {
@@ -155,17 +207,17 @@ func (bc *Blockchain) AddTransaction(tx block.Transaction) error {
 // new
 
 func (bc *Blockchain) RegisterMiner(address string) error {
-	if bc.MinerRegistry == nil {
-		bc.MinerRegistry = miner.NewRegistry()
-	}
+	bc.rehydrate()
 	if err := bc.MinerRegistry.Register(address); err != nil {
 		return err
 	}
 	bc.MinerAddress = address
+	bc.syncRegisteredMiners()
 	return nil
 }
 
 func (bc *Blockchain) IsMinerRegistered(address string) bool {
+	bc.rehydrate()
 	if bc.MinerRegistry == nil {
 		return false
 	}
@@ -173,6 +225,7 @@ func (bc *Blockchain) IsMinerRegistered(address string) bool {
 }
 
 func (bc *Blockchain) RegisteredMiners() []string {
+	bc.rehydrate()
 	if bc.MinerRegistry == nil {
 		return []string{}
 	}
@@ -182,6 +235,7 @@ func (bc *Blockchain) RegisteredMiners() []string {
 //new
 
 func (bc *Blockchain) MinePendingTransactions(maxBlockSize int) (*block.Block, error) {
+	bc.rehydrate()
 	if len(bc.PendingTransactions) == 0 {
 		return nil, errors.New("no pending transactions to mine")
 	}
