@@ -1,6 +1,8 @@
 package block
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -10,7 +12,7 @@ func TestDeterministicHashing(t *testing.T) {
 	b := &Block{
 		Index:        1,
 		Timestamp:    time.Now().Unix(),
-		Transactions: []Transaction{{Sender: "Alice", Recipient: "Bob", Amount: 50.0}},
+		Transactions: []Transaction{{Sender: "Alice", Recipient: "Bob", Amount: 50}},
 		PreviousHash: "0000000000000000000000000000000000000000000000000000000000000000",
 		Nonce:        100,
 	}
@@ -20,6 +22,34 @@ func TestDeterministicHashing(t *testing.T) {
 
 	if hash1 != hash2 {
 		t.Errorf("Hashes are not identical!\nHash 1: %s\nHash 2: %s", hash1, hash2)
+	}
+}
+
+func TestMerkleRootSingleTransaction(t *testing.T) {
+	tx := Transaction{Sender: "Alice", Recipient: "Bob", Amount: 50}
+	b := &Block{Transactions: []Transaction{tx}}
+
+	expected := fmt.Sprintf("%x", sha256.Sum256([]byte(tx.Payload())))
+	if got := b.MerkleRoot(); got != expected {
+		t.Errorf("expected merkle root %s for a single transaction, got %s", expected, got)
+	}
+}
+
+func TestBlockMerkleRootIntegration(t *testing.T) {
+	b := &Block{
+		Transactions: []Transaction{
+			{Sender: "Alice", Recipient: "Bob", Amount: 10},
+			{Sender: "Carol", Recipient: "Dan", Amount: 20},
+		},
+	}
+
+	leaf1 := sha256.Sum256([]byte(b.Transactions[0].Payload()))
+	leaf2 := sha256.Sum256([]byte(b.Transactions[1].Payload()))
+	parent := sha256.Sum256(append(append([]byte(nil), leaf1[:]...), leaf2[:]...))
+	expected := fmt.Sprintf("%x", parent)
+
+	if got := b.MerkleRoot(); got != expected {
+		t.Errorf("expected block merkle root %s, got %s", expected, got)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"toy-blockchain/internal/block"
@@ -26,16 +27,24 @@ const (
 )
 
 type CLI struct {
-	dbFile       string
-	difficulty   int
-	maxBlockSize int
+	dbFile                     string
+	difficulty                 int
+	maxBlockSize               int
+	minerWorkers               int
+	minerTimeout               time.Duration
+	difficultyRetargetInterval int
+	expectedBlockTimeSeconds   int
 }
 
-func NewCLI(dbFile string, difficulty int, maxBlockSize int) *CLI {
+func NewCLI(dbFile string, difficulty int, maxBlockSize int, minerWorkers int, minerTimeout time.Duration, difficultyRetargetInterval int, expectedBlockTimeSeconds int) *CLI {
 	return &CLI{
-		dbFile:       dbFile,
-		difficulty:   difficulty,
-		maxBlockSize: maxBlockSize,
+		dbFile:                     dbFile,
+		difficulty:                 difficulty,
+		maxBlockSize:               maxBlockSize,
+		minerWorkers:               minerWorkers,
+		minerTimeout:               minerTimeout,
+		difficultyRetargetInterval: difficultyRetargetInterval,
+		expectedBlockTimeSeconds:   expectedBlockTimeSeconds,
 	}
 }
 
@@ -49,8 +58,19 @@ func (cli *CLI) Run() {
 			fmt.Printf(Red+"Error loading blockchain: %v\n"+Reset, err)
 			os.Exit(1)
 		}
+		if cli.minerWorkers > 0 {
+			bc.MinerWorkers = cli.minerWorkers
+		}
+		if cli.minerTimeout > 0 {
+			bc.MinerTimeout = cli.minerTimeout
+		}
 	} else {
-		bc = chain.NewBlockchain(cli.difficulty)
+		bc = chain.NewBlockchainWithDifficultyConfig(cli.difficulty, chain.DifficultyConfig{
+			RetargetInterval:         cli.difficultyRetargetInterval,
+			ExpectedBlockTimeSeconds: cli.expectedBlockTimeSeconds,
+		})
+		bc.MinerWorkers = cli.minerWorkers
+		bc.MinerTimeout = cli.minerTimeout
 		err = storage.SaveToFile(cli.dbFile, bc)
 		if err != nil {
 			fmt.Printf(Red+"Error initializing blockchain file: %v\n"+Reset, err)
@@ -60,7 +80,7 @@ func (cli *CLI) Run() {
 
 	l := ledger.NewLedger(bc)
 
-	addressBook, privateKeys := loadWallets()
+	addressBook, privateKeys := loadWallets(cli.dbFile)
 
 	for {
 		cli.printHeader()
@@ -85,17 +105,45 @@ func (cli *CLI) Run() {
 			fmt.Print("Enter a Name for this Wallet (e.g., Janindu): ")
 			fmt.Scanln(&name)
 
+			name = strings.TrimSpace(name)
+			if name == "" {
+				fmt.Println(Red + "Wallet name cannot be empty." + Reset)
+				cli.waitForUser()
+				continue
+			}
+			if hasWalletName(addressBook, name) {
+				fmt.Printf(Red+"Wallet name '%s' already exists. Please choose a different name.\n"+Reset, name)
+				cli.waitForUser()
+				continue
+			}
+
 			fmt.Println(Yellow + "Generating a secure cryptographic key pair..." + Reset)
 			privKey, pubKey, err := wallet.GenerateKeyPair()
 			if err != nil {
 				fmt.Println(Red + "Error generating keys!" + Reset)
 				continue
 			}
+			normalizedName := normalizeWalletName(name)
 
-			addressBook[name] = pubKey
-			privateKeys[name] = privKey
+			addressBook[normalizedName] = pubKey
+			privateKeys[normalizedName] = privKey
 
-			saveWallets(addressBook, privateKeys)
+			// new
+
+			fmt.Print("Register this wallet as a miner? (y/n): ")
+			var registerChoice string
+			fmt.Scanln(&registerChoice)
+			if strings.EqualFold(registerChoice, "y") || strings.EqualFold(registerChoice, "yes") {
+				if err := bc.RegisterMiner(pubKey); err != nil {
+					fmt.Printf(Red+"Failed to register miner: %v\n"+Reset, err)
+				} else {
+					fmt.Printf(Green+"SUCCESS! Wallet '%s' registered as a miner.\n"+Reset, name)
+				}
+			}
+
+			// new
+
+			saveWallets(addressBook, privateKeys, cli.dbFile)
 
 			fmt.Printf(Green+"SUCCESS! Wallet created and securely saved for '%s'.\n"+Reset, name)
 		case 2:
@@ -164,8 +212,8 @@ func (cli *CLI) Run() {
 			fmt.Print("Enter your Private Key to sign the transaction: ")
 			fmt.Scanln(&privKey)
 
-			pubKeyFrom, ok1 := addressBook[from]
-			pubKeyTo, ok2 := addressBook[to]
+			pubKeyFrom, ok1 := resolveWalletName(addressBook, from)
+			pubKeyTo, ok2 := resolveWalletName(addressBook, to)
 
 			if !ok1 || !ok2 {
 				fmt.Println(Red + "Error: Sender or Recipient not found in your local Address Book!" + Reset)
@@ -206,6 +254,68 @@ func (cli *CLI) Run() {
 			fmt.Println(Green + "SUCCESS: Transaction added to the pending pool!" + Reset)
 
 		case 4:
+
+			// new
+
+			if len(bc.RegisteredMiners()) == 0 {
+				fmt.Println(Red + "No registered miners available. Create a wallet and register it as a miner first." + Reset)
+				cli.waitForUser()
+				continue
+			}
+
+			registeredMiners := bc.RegisteredMiners()
+
+			pubToName := make(map[string]string)
+			for name, pubKey := range addressBook {
+				pubToName[pubKey] = name
+			}
+
+			fmt.Println(Yellow + "Select a registered miner wallet:" + Reset)
+			for i, minerAddr := range registeredMiners {
+				displayValue := minerAddr
+				if name, exists := pubToName[minerAddr]; exists {
+					displayValue = fmt.Sprintf("%s (%s)", name, minerAddr)
+				}
+				fmt.Printf("  %d. %s\n", i+1, displayValue)
+			}
+			fmt.Print("Enter the miner wallet name, address, or its index: ")
+			var minerInput string
+			fmt.Scanln(&minerInput)
+
+			selectedMiner := ""
+			if index := 0; len(minerInput) > 0 {
+				if _, err := fmt.Sscanf(minerInput, "%d", &index); err == nil {
+					if index > 0 && index <= len(registeredMiners) {
+						selectedMiner = registeredMiners[index-1]
+					}
+				}
+			}
+			if selectedMiner == "" {
+				selectedMiner = minerInput
+			}
+			if selectedMiner == "" {
+				for _, minerAddr := range registeredMiners {
+					if strings.EqualFold(minerInput, minerAddr) {
+						selectedMiner = minerAddr
+						break
+					}
+					if name, exists := pubToName[minerAddr]; exists && strings.EqualFold(minerInput, name) {
+						selectedMiner = minerAddr
+						break
+					}
+				}
+			}
+
+			if selectedMiner == "" || !bc.IsMinerRegistered(selectedMiner) {
+				fmt.Println(Red + "Invalid miner wallet. Please choose a registered miner." + Reset)
+				cli.waitForUser()
+				continue
+			}
+
+			bc.MinerAddress = selectedMiner
+
+			// new
+
 			fmt.Println(Yellow + "Mining pending transactions into a new block... Please wait..." + Reset)
 			startTime := time.Now()
 			newBlock, err := bc.MinePendingTransactions(cli.maxBlockSize)
@@ -341,19 +451,87 @@ type WalletStore struct {
 	PrivateKeys map[string]string `json:"private_keys"`
 }
 
-func loadWallets() (map[string]string, map[string]string) {
-	data, err := os.ReadFile("wallets.json")
-	if err != nil {
-
-		return make(map[string]string), make(map[string]string)
+func normalizeWalletName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+func hasWalletName(addressBook map[string]string, name string) bool {
+	normalizedName := normalizeWalletName(name)
+	for existingName := range addressBook {
+		if normalizeWalletName(existingName) == normalizedName {
+			return true
+		}
 	}
-	var store WalletStore
-	json.Unmarshal(data, &store)
-	return store.AddressBook, store.PrivateKeys
+	return false
 }
 
-func saveWallets(addresses, privates map[string]string) {
+func resolveWalletName(addressBook map[string]string, name string) (string, bool) {
+	normalizedName := normalizeWalletName(name)
+	for existingName, pubKey := range addressBook {
+		if normalizeWalletName(existingName) == normalizedName {
+			return pubKey, true
+		}
+	}
+	return "", false
+}
+
+func loadWallets(dbFile string) (map[string]string, map[string]string) {
+	walletPath := walletStorePath(dbFile)
+	data, err := os.ReadFile(walletPath)
+	if err != nil {
+		legacyPath := filepath.Join(".", "wallets.json")
+		if legacyPath == walletPath {
+			return make(map[string]string), make(map[string]string)
+		}
+		data, err = os.ReadFile(legacyPath)
+		if err != nil {
+			return make(map[string]string), make(map[string]string)
+		}
+	}
+	var store WalletStore
+	// json.Unmarshal(data, &store)
+
+	if err := json.Unmarshal(data, &store); err != nil {
+		return make(map[string]string), make(map[string]string)
+	}
+
+	addressBook := make(map[string]string, len(store.AddressBook))
+	privateKeys := make(map[string]string, len(store.PrivateKeys))
+	for name, pubKey := range store.AddressBook {
+		normalizedName := normalizeWalletName(name)
+		if normalizedName == "" {
+			continue
+		}
+		addressBook[normalizedName] = pubKey
+	}
+	for name, privKey := range store.PrivateKeys {
+		normalizedName := normalizeWalletName(name)
+		if normalizedName == "" {
+			continue
+		}
+		privateKeys[normalizedName] = privKey
+	}
+
+	return addressBook, privateKeys
+}
+
+func saveWallets(addresses, privates map[string]string, dbFile string) {
 	store := WalletStore{AddressBook: addresses, PrivateKeys: privates}
 	data, _ := json.MarshalIndent(store, "", "  ")
-	os.WriteFile("wallets.json", data, 0644)
+	walletPath := walletStorePath(dbFile)
+	if err := os.MkdirAll(filepath.Dir(walletPath), 0o755); err == nil {
+		_ = os.WriteFile(walletPath, data, 0644)
+	}
+}
+
+func walletStorePath(dbFile string) string {
+	if dbFile == "" {
+		return filepath.Join("data", "wallets.json")
+	}
+
+	dir := filepath.Dir(dbFile)
+	if dir == "." || dir == "" {
+		return filepath.Join("data", "wallets.json")
+	}
+
+	return filepath.Join(dir, "wallets.json")
 }

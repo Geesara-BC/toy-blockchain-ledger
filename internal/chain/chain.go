@@ -1,25 +1,47 @@
 package chain
 
 import (
+	"context"
 	"errors"
-
+	"fmt"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 	"toy-blockchain/internal/block"
+	"toy-blockchain/internal/miner"
 	"toy-blockchain/internal/wallet"
 )
 
 type Blockchain struct {
 	Blocks              []*block.Block      `json:"blocks"`
 	Difficulty          int                 `json:"difficulty"`
+	BaseDifficulty      int                 `json:"base_difficulty"`
+	DifficultyConfig    DifficultyConfig    `json:"difficulty_config"`
 	PendingTransactions []block.Transaction `json:"pending_transactions"`
+	RewardEngine        *miner.RewardEngine `json:"-"`
+	MinerRegistry       *miner.Registry     `json:"-"`
+	MinerAddress        string              `json:"miner_address"`
+	MinerWorkers        int                 `json:"miner_workers"`
+	MinerTimeout        time.Duration       `json:"miner_timeout"`
 }
 
 func NewBlockchain(difficulty int) *Blockchain {
+	return NewBlockchainWithDifficultyConfig(difficulty, NewDifficultyConfig())
+}
+
+func NewBlockchainWithDifficultyConfig(difficulty int, config DifficultyConfig) *Blockchain {
 	return &Blockchain{
 		Blocks:              []*block.Block{block.NewGenesisBlock()},
 		Difficulty:          difficulty,
+		BaseDifficulty:      difficulty,
+		DifficultyConfig:    config,
 		PendingTransactions: []block.Transaction{},
+		RewardEngine:        miner.NewRewardEngine(50, miner.NewFixedFeePolicy(0)),
+		MinerRegistry:       miner.NewRegistry(),
+		MinerAddress:        "",
+		MinerWorkers:        0,
+		MinerTimeout:        10 * time.Second,
 	}
 }
 
@@ -130,6 +152,35 @@ func (bc *Blockchain) AddTransaction(tx block.Transaction) error {
 	return nil
 }
 
+// new
+
+func (bc *Blockchain) RegisterMiner(address string) error {
+	if bc.MinerRegistry == nil {
+		bc.MinerRegistry = miner.NewRegistry()
+	}
+	if err := bc.MinerRegistry.Register(address); err != nil {
+		return err
+	}
+	bc.MinerAddress = address
+	return nil
+}
+
+func (bc *Blockchain) IsMinerRegistered(address string) bool {
+	if bc.MinerRegistry == nil {
+		return false
+	}
+	return bc.MinerRegistry.IsRegistered(address)
+}
+
+func (bc *Blockchain) RegisteredMiners() []string {
+	if bc.MinerRegistry == nil {
+		return []string{}
+	}
+	return bc.MinerRegistry.List()
+}
+
+//new
+
 func (bc *Blockchain) MinePendingTransactions(maxBlockSize int) (*block.Block, error) {
 	if len(bc.PendingTransactions) == 0 {
 		return nil, errors.New("no pending transactions to mine")
@@ -143,31 +194,150 @@ func (bc *Blockchain) MinePendingTransactions(maxBlockSize int) (*block.Block, e
 
 	latestBlock := bc.GetLatestBlock()
 
+	//new
+
+	selectedMiner := bc.MinerAddress
+	if selectedMiner == "" {
+		registeredMiners := bc.RegisteredMiners()
+		if len(registeredMiners) > 0 {
+			selectedMiner = registeredMiners[0]
+			bc.MinerAddress = selectedMiner
+		}
+	} else if !bc.IsMinerRegistered(selectedMiner) {
+		registeredMiners := bc.RegisteredMiners()
+		if len(registeredMiners) > 0 {
+			return nil, errors.New("miner address is not registered")
+		}
+	}
+
+	var coinbaseTx block.Transaction
+	var reward miner.Reward
+	if selectedMiner != "" {
+		var err error
+		coinbaseTx, reward, err = bc.RewardEngine.BuildCoinbaseTransaction(selectedMiner, transactionsToMine)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	rewardedTransactions := append([]block.Transaction{}, transactionsToMine...)
+	if selectedMiner != "" {
+		rewardedTransactions = append(rewardedTransactions, coinbaseTx)
+	}
+
+	//new
+
+	nextDifficulty := bc.calculateNextDifficulty()
 	newBlock := &block.Block{
 		Index:        latestBlock.Index + 1,
 		Timestamp:    time.Now().Unix(),
-		Transactions: transactionsToMine,
+		Transactions: rewardedTransactions,
 		PreviousHash: latestBlock.Hash,
 		Nonce:        0,
-		Difficulty:   bc.Difficulty,
+		Difficulty:   nextDifficulty,
+	}
+	targetPrefix := strings.Repeat("0", nextDifficulty)
+	workerCount := bc.MinerWorkers
+	if workerCount <= 0 {
+		workerCount = determineMiningWorkers()
+	}
+	minedBlock, err := bc.mineBlockConcurrent(newBlock, targetPrefix, workerCount)
+	if err != nil {
+		return nil, err
 	}
 
-	targetPrefix := strings.Repeat("0", bc.Difficulty)
-
-	for {
-		newBlock.Hash = newBlock.CalculateHash()
-		if strings.HasPrefix(newBlock.Hash, targetPrefix) {
-			break
-		}
-		newBlock.Nonce++
-	}
-
-	// Mark the newly mined block as immutable
-	newBlock.IsImmutable = true
-	bc.Blocks = append(bc.Blocks, newBlock)
+	minedBlock.Transactions = rewardedTransactions
+	minedBlock.IsImmutable = true
+	bc.Blocks = append(bc.Blocks, minedBlock)
 	bc.PendingTransactions = bc.PendingTransactions[txCount:]
-	return newBlock, nil
+	_ = reward
+	return minedBlock, nil
 }
+
+// new
+
+func determineMiningWorkers() int {
+	workers := runtime.NumCPU()
+	if workers < 1 {
+		return 1
+	}
+	return workers
+}
+
+func (bc *Blockchain) mineBlockConcurrent(template *block.Block, targetPrefix string, workers int) (*block.Block, error) {
+	if workers <= 0 {
+		workers = 1
+	}
+
+	type result struct {
+		block *block.Block
+		err   error
+	}
+
+	timeout := bc.MinerTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	results := make(chan result, 1)
+	var once sync.Once
+
+	closeResult := func(res result) {
+
+		select {
+		case results <- res:
+		default:
+		}
+	}
+
+	for workerID := 0; workerID < workers; workerID++ {
+		go func(workerID int) {
+			startNonce := workerID
+			candidate := *template
+			candidate.Nonce = startNonce
+			candidate.Timestamp = template.Timestamp
+			candidate.Transactions = append([]block.Transaction(nil), template.Transactions...)
+
+			for {
+				candidate.Hash = candidate.CalculateHash()
+				if strings.HasPrefix(candidate.Hash, targetPrefix) {
+					once.Do(func() {
+						closeResult(result{block: &candidate})
+						cancel()
+					})
+					return
+				}
+
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				candidate.Nonce += workers
+			}
+		}(workerID)
+	}
+
+	select {
+	case res := <-results:
+		if res.err != nil {
+			return nil, res.err
+		}
+		return res.block, nil
+	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("mining timed out: %w", ctx.Err())
+		}
+
+		return nil, fmt.Errorf("mining cancelled")
+	}
+}
+
+// new
 
 func (bc *Blockchain) IsValid() (bool, int) {
 
@@ -200,7 +370,13 @@ func (bc *Blockchain) IsValid() (bool, int) {
 		if current.PreviousHash != previous.Hash {
 			return false, current.Index
 		}
-		targetPrefix := strings.Repeat("0", bc.Difficulty)
+
+		expectedDifficulty := bc.expectedDifficultyForBlock(current.Index)
+		if current.Difficulty != expectedDifficulty {
+			return false, current.Index
+		}
+		targetPrefix := strings.Repeat("0", current.Difficulty)
+
 		if !strings.HasPrefix(current.Hash, targetPrefix) {
 			return false, current.Index
 		}
