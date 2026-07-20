@@ -1,3 +1,6 @@
 # Runtime data — never commit real wallets or chain state
+
 data/wallets.json
 data/blockchain.json    
+
+
