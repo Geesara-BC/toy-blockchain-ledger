@@ -17,14 +17,15 @@ type Transaction struct {
 }
 
 type Block struct {
-	Index        int           `json:"index"`
-	Timestamp    int64         `json:"timestamp"`
-	Transactions []Transaction `json:"transactions"`
-	PreviousHash string        `json:"previous_hash"`
-	Nonce        int           `json:"nonce"`
-	Difficulty   int           `json:"difficulty"`
-	Hash         string        `json:"hash,omitempty"`
-	IsImmutable  bool          `json:"is_immutable"`
+	Index           int           `json:"index"`
+	Timestamp       int64         `json:"timestamp"`
+	Transactions    []Transaction `json:"transactions"`
+	PreviousHash    string        `json:"previous_hash"`
+	Nonce           int           `json:"nonce"`
+	MerkleRootValue string        `json:"merkle_root,omitempty"`
+	Difficulty      int           `json:"difficulty"`
+	Hash            string        `json:"hash,omitempty"`
+	IsImmutable     bool          `json:"is_immutable"`
 }
 
 type blockForHash struct {
@@ -80,6 +81,8 @@ func NewGenesisBlock() *Block {
 		IsImmutable:  true,
 	}
 
+	// Ensure merkle root is populated for persistence
+	genesisBlock.MerkleRootValue = genesisBlock.MerkleRoot()
 	genesisBlock.Hash = genesisBlock.CalculateHash()
 	return genesisBlock
 }

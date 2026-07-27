@@ -374,6 +374,12 @@ func (cli *CLI) Run() {
 				}
 				fmt.Printf("%sBlock #%d %s\n", blockColor, b.Index, Reset)
 				fmt.Printf("  Hash: %s%s%s\n", Green, b.Hash, Reset)
+
+				fmt.Printf("  Prev Hash: %s%s%s\n", Yellow, b.PreviousHash, Reset)
+				// MerkleRoot has a pointer receiver; take address of range variable
+				fmt.Printf("  Merkle Root: %s%s%s\n", Cyan, (&b).MerkleRoot(), Reset)
+				fmt.Printf("  Nonce: %d | Tx Count: %d\n", b.Nonce, len(b.Transactions))
+
 				fmt.Println("  Transactions:")
 				if len(b.Transactions) == 0 {
 					fmt.Println("      [Genesis Block - System Initialized]")

@@ -7,11 +7,20 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"toy-blockchain/internal/block"
 	"toy-blockchain/internal/miner"
 	"toy-blockchain/internal/wallet"
+	"unicode/utf8"
 )
+
+// MiningBenchmarkResult captures the cost of mining a block at a specific difficulty.
+type MiningBenchmarkResult struct {
+	Difficulty  int
+	TimeTaken   time.Duration
+	HashesTried int64
+}
 
 type Blockchain struct {
 	Blocks                 []*block.Block      `json:"blocks"`
@@ -93,9 +102,19 @@ func (bc *Blockchain) PrepareForPersistence() {
 		}
 	}
 	bc.syncRegisteredMiners()
+	bc.populateMerkleRoots()
 }
 
 // new new new
+
+func (bc *Blockchain) populateMerkleRoots() {
+	for _, b := range bc.Blocks {
+		if b == nil {
+			continue
+		}
+		b.MerkleRootValue = b.MerkleRoot()
+	}
+}
 
 // GetBlocks returns deep copies of blocks to prevent modification (true immutability)
 func (bc *Blockchain) GetBlocks() []block.Block {
@@ -295,7 +314,7 @@ func (bc *Blockchain) MinePendingTransactions(maxBlockSize int) (*block.Block, e
 	if workerCount <= 0 {
 		workerCount = determineMiningWorkers()
 	}
-	minedBlock, err := bc.mineBlockConcurrent(newBlock, targetPrefix, workerCount)
+	minedBlock, _, err := bc.mineBlockConcurrent(newBlock, targetPrefix, workerCount)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +337,129 @@ func determineMiningWorkers() int {
 	return workers
 }
 
-func (bc *Blockchain) mineBlockConcurrent(template *block.Block, targetPrefix string, workers int) (*block.Block, error) {
+// BenchmarkMining measures how mining effort scales with difficulty.
+// It mines a simple block template at each requested difficulty and records the elapsed time and
+// number of hash attempts required to find a valid nonce.
+func (bc *Blockchain) BenchmarkMining(difficulties []int, maxBlockSize int, timeout time.Duration) []MiningBenchmarkResult {
+	if len(difficulties) == 0 {
+		return nil
+	}
+
+	results := make([]MiningBenchmarkResult, 0, len(difficulties))
+	for _, difficulty := range difficulties {
+		if difficulty < 1 {
+			difficulty = 1
+		}
+
+		latestBlock := bc.GetLatestBlock()
+		template := &block.Block{
+			Index:        latestBlock.Index + 1,
+			Timestamp:    time.Now().Unix(),
+			Transactions: []block.Transaction{},
+			PreviousHash: latestBlock.Hash,
+			Nonce:        0,
+			Difficulty:   difficulty,
+		}
+
+		start := time.Now()
+		mined, attempts, err := bc.mineBlockConcurrent(template, strings.Repeat("0", difficulty), bc.effectiveMinerWorkers())
+		elapsed := time.Since(start)
+		// Always record attempts even if mining timed out or failed.
+		if err != nil || mined == nil {
+			results = append(results, MiningBenchmarkResult{Difficulty: difficulty, TimeTaken: elapsed, HashesTried: attempts})
+			continue
+		}
+
+		results = append(results, MiningBenchmarkResult{Difficulty: difficulty, TimeTaken: elapsed, HashesTried: attempts})
+	}
+	return results
+}
+
+func (bc *Blockchain) effectiveMinerWorkers() int {
+	if bc.MinerWorkers > 0 {
+		return bc.MinerWorkers
+	}
+	return determineMiningWorkers()
+}
+
+func FormatMiningBenchmarkTable(results []MiningBenchmarkResult) string {
+	if len(results) == 0 {
+		return "No benchmark results"
+	}
+	// Prepare string representations
+	headers := []string{"Difficulty", "Time Taken", "Hashes Tried"}
+	rows := make([][3]string, len(results))
+	for i, r := range results {
+		rows[i][0] = fmt.Sprintf("%d", r.Difficulty)
+		rows[i][1] = r.TimeTaken.String()
+		rows[i][2] = fmt.Sprintf("%d", r.HashesTried)
+	}
+
+	// compute column widths
+	colWidths := make([]int, 3)
+	for i, h := range headers {
+		colWidths[i] = utf8.RuneCountInString(h)
+	}
+	for _, row := range rows {
+		for i, cell := range row {
+			rc := utf8.RuneCountInString(cell)
+			if rc > colWidths[i] {
+				colWidths[i] = rc
+			}
+		}
+	}
+
+	// helpers
+	padCenter := func(s string, width int) string {
+		rc := utf8.RuneCountInString(s)
+		if rc >= width {
+			return s
+		}
+		total := width - rc
+		left := total / 2
+		right := total - left
+		return strings.Repeat(" ", left) + s + strings.Repeat(" ", right)
+	}
+	// padRight is intentionally omitted (not used)
+	padLeft := func(s string, width int) string {
+		rc := utf8.RuneCountInString(s)
+		if rc >= width {
+			return s
+		}
+		return strings.Repeat(" ", width-rc) + s
+	}
+
+	var b strings.Builder
+
+	// header
+	b.WriteString("| ")
+	b.WriteString(padCenter(headers[0], colWidths[0]))
+	b.WriteString(" | ")
+	b.WriteString(padCenter(headers[1], colWidths[1]))
+	b.WriteString(" | ")
+	b.WriteString(padCenter(headers[2], colWidths[2]))
+	b.WriteString(" |\n")
+
+	// separator
+	b.WriteString("|-")
+	b.WriteString(strings.Repeat("-", colWidths[0]))
+	b.WriteString("-|-" + strings.Repeat("-", colWidths[1]) + "-|-" + strings.Repeat("-", colWidths[2]) + "-|\n")
+
+	// rows: center difficulty and time, right-align hashes
+	for _, row := range rows {
+		b.WriteString("| ")
+		b.WriteString(padCenter(row[0], colWidths[0]))
+		b.WriteString(" | ")
+		b.WriteString(padCenter(row[1], colWidths[1]))
+		b.WriteString(" | ")
+		b.WriteString(padLeft(row[2], colWidths[2]))
+		b.WriteString(" |\n")
+	}
+
+	return b.String()
+}
+
+func (bc *Blockchain) mineBlockConcurrent(template *block.Block, targetPrefix string, workers int) (*block.Block, int64, error) {
 	if workers <= 0 {
 		workers = 1
 	}
@@ -338,13 +479,10 @@ func (bc *Blockchain) mineBlockConcurrent(template *block.Block, targetPrefix st
 
 	results := make(chan result, 1)
 	var once sync.Once
+	var attempts int64
 
 	closeResult := func(res result) {
-
-		select {
-		case results <- res:
-		default:
-		}
+		results <- res
 	}
 
 	for workerID := 0; workerID < workers; workerID++ {
@@ -357,6 +495,7 @@ func (bc *Blockchain) mineBlockConcurrent(template *block.Block, targetPrefix st
 
 			for {
 				candidate.Hash = candidate.CalculateHash()
+				atomic.AddInt64(&attempts, 1)
 				if strings.HasPrefix(candidate.Hash, targetPrefix) {
 					once.Do(func() {
 						closeResult(result{block: &candidate})
@@ -379,15 +518,26 @@ func (bc *Blockchain) mineBlockConcurrent(template *block.Block, targetPrefix st
 	select {
 	case res := <-results:
 		if res.err != nil {
-			return nil, res.err
+			return nil, attempts, res.err
 		}
-		return res.block, nil
+		return res.block, attempts, nil
 	case <-ctx.Done():
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("mining timed out: %w", ctx.Err())
+		// if a worker just found a result around the same time as ctx.Done,
+		// try to read it before returning to avoid missing a valid result.
+		select {
+		case res := <-results:
+			if res.err != nil {
+				return nil, attempts, res.err
+			}
+			return res.block, attempts, nil
+		default:
 		}
 
-		return nil, fmt.Errorf("mining cancelled")
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, attempts, fmt.Errorf("mining timed out: %w", ctx.Err())
+		}
+
+		return nil, attempts, fmt.Errorf("mining cancelled")
 	}
 }
 

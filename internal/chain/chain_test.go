@@ -119,7 +119,7 @@ func TestMineBlockConcurrentFindsValidHash(t *testing.T) {
 	}
 
 	targetPrefix := strings.Repeat("0", bc.Difficulty)
-	mined, err := bc.mineBlockConcurrent(template, targetPrefix, 4)
+	mined, _, err := bc.mineBlockConcurrent(template, targetPrefix, 4)
 	if err != nil {
 		t.Fatalf("concurrent mining failed: %v", err)
 	}
