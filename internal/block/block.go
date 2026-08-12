@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"toy-blockchain/internal/wallet"
 	"toy-blockchain/internal/merkle"
 )
 
@@ -12,6 +13,7 @@ type Transaction struct {
 	Recipient string `json:"recipient"`
 	Amount    int64  `json:"amount"`
 	Fee       int64  `json:"fee"`
+	Nonce     int64  `json:"nonce"`
 	PublicKey string `json:"public_key"`
 	Signature string `json:"signature"`
 }
@@ -39,7 +41,14 @@ type blockForHash struct {
 }
 
 func (tx *Transaction) Payload() string {
-	return fmt.Sprintf("%s:%s:%d:%d", tx.Sender, tx.Recipient, tx.Amount, tx.Fee)
+	return fmt.Sprintf("%s:%s:%d:%d:%d", tx.Sender, tx.Recipient, tx.Amount, tx.Fee, tx.Nonce)
+}
+
+func (tx *Transaction) VerifySignature() bool {
+	if tx.PublicKey == "" || tx.Signature == "" {
+		return false
+	}
+	return wallet.Verify(tx.PublicKey, tx.Payload(), tx.Signature)
 }
 
 func (b *Block) MerkleRoot() string {

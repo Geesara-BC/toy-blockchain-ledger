@@ -45,6 +45,7 @@ func (bc *Blockchain) ReplaceWithLongestChain(candidate *Blockchain) error {
 	bc.MinerAddress = candidate.MinerAddress
 	bc.MinerWorkers = candidate.MinerWorkers
 	bc.MinerTimeout = candidate.MinerTimeout
+	bc.rebuildState()
 
 	return nil
 }
@@ -74,5 +75,5 @@ func (bc *Blockchain) filterPendingTransactions(candidate *Blockchain) []block.T
 }
 
 func transactionKey(tx block.Transaction) string {
-	return fmt.Sprintf("%s|%s|%d|%d|%s|%s", tx.Sender, tx.Recipient, tx.Amount, tx.Fee, tx.PublicKey, tx.Signature)
+	return fmt.Sprintf("%s|%s|%d|%d|%d|%s|%s", tx.Sender, tx.Recipient, tx.Amount, tx.Fee, tx.Nonce, tx.PublicKey, tx.Signature)
 }

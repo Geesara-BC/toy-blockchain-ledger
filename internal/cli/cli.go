@@ -225,10 +225,12 @@ func (cli *CLI) Run() {
 				cli.waitForUser()
 				continue
 			}
+			senderAddr := mustAddressFromPublicKey(pubKeyFrom)
 			tx := block.Transaction{
-				Sender:    pubKeyFrom,
+				Sender:    senderAddr,
 				Recipient: pubKeyTo,
 				Amount:    amount,
+				Nonce:     bc.GetPendingAccountNonce(senderAddr) + 1,
 				PublicKey: pubKeyFrom,
 			}
 
@@ -478,6 +480,14 @@ func resolveWalletName(addressBook map[string]string, name string) (string, bool
 		}
 	}
 	return "", false
+}
+
+func mustAddressFromPublicKey(pubKey string) string {
+	address, err := wallet.AddressFromPublicKey(pubKey)
+	if err != nil {
+		return pubKey
+	}
+	return address
 }
 
 func loadWallets(dbFile string) (map[string]string, map[string]string) {

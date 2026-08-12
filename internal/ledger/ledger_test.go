@@ -20,18 +20,23 @@ func TestOverspendingTransactionRejected(t *testing.T) {
 	}
 
 	privKey, pubKey, _ := wallet.GenerateKeyPair()
+	addr, err := wallet.AddressFromPublicKey(pubKey)
+	if err != nil {
+		t.Fatalf("failed to derive address: %v", err)
+	}
 
 	tx := block.Transaction{
-		Sender:    pubKey,
+		Sender:    addr,
 		Recipient: "Bob",
 		Amount:    150,
+		Nonce:     1,
 		PublicKey: pubKey,
 	}
 
 	sig, _ := wallet.Sign(privKey, tx.Payload())
 	tx.Signature = sig
 
-	err := l.VerifyTransaction(tx)
+	err = l.VerifyTransaction(tx)
 
 	if err == nil {
 		t.Errorf("Expected transaction to be rejected due to insufficient balance, but got no error")
@@ -50,20 +55,26 @@ func TestMalformedTransactionRejected(t *testing.T) {
 	l := NewLedger(bc)
 
 	privKey, pubKey, _ := wallet.GenerateKeyPair()
+	addr, err := wallet.AddressFromPublicKey(pubKey)
+	if err != nil {
+		t.Fatalf("failed to derive address: %v", err)
+	}
 
 	txZero := block.Transaction{
-		Sender:    pubKey,
+		Sender:    addr,
 		Recipient: "Bob",
 		Amount:    0,
+		Nonce:     1,
 		PublicKey: pubKey,
 	}
 	sigZero, _ := wallet.Sign(privKey, txZero.Payload())
 	txZero.Signature = sigZero
 
 	txNegative := block.Transaction{
-		Sender:    pubKey,
+		Sender:    addr,
 		Recipient: "Bob",
 		Amount:    -50,
+		Nonce:     1,
 		PublicKey: pubKey,
 	}
 	sigNeg, _ := wallet.Sign(privKey, txNegative.Payload())
