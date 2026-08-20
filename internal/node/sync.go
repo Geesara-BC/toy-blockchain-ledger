@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"net/http"
 	"strings"
 
 	"toy-blockchain/internal/block"
@@ -17,6 +19,9 @@ func (n *Node) SyncFrom(peer string) error {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("peer returned status %s", resp.Status)
+	}
 
 	var info struct {
 		Height int    `json:"height"`
@@ -26,7 +31,13 @@ func (n *Node) SyncFrom(peer string) error {
 		return err
 	}
 
-	candidate := chain.NewBlockchainWithDifficultyConfig(n.BC.Difficulty, n.BC.DifficultyConfig)
+	// read blockchain config under lock to avoid races while another goroutine mutates BC
+	n.mu.RLock()
+	diff := n.BC.Difficulty
+	cfg := n.BC.DifficultyConfig
+	n.mu.RUnlock()
+
+	candidate := chain.NewBlockchainWithDifficultyConfig(diff, cfg)
 	candidate.Blocks = make([]*block.Block, 0, info.Height+1)
 
 	tempBalances := make(map[string]int64)
@@ -37,6 +48,10 @@ func (n *Node) SyncFrom(peer string) error {
 		r2, err := n.client.Get(url)
 		if err != nil {
 			return err
+		}
+		if r2.StatusCode < http.StatusOK || r2.StatusCode >= http.StatusMultipleChoices {
+			r2.Body.Close()
+			return fmt.Errorf("peer returned status %s for block %d", r2.Status, i)
 		}
 
 		var b block.Block
@@ -67,6 +82,11 @@ func (n *Node) SyncFrom(peer string) error {
 	defer n.mu.Unlock()
 	if err := n.BC.ReplaceWithLongestChain(candidate); err != nil {
 		return err
+	}
+	if n.dbPath != "" {
+		if err := n.Save(); err != nil {
+			log.Printf("[Node persistence] failed to save replaced chain: %v", err)
+		}
 	}
 	return nil
 }

@@ -22,17 +22,45 @@ Clone or unzip the project, then from the project root:
 # Run all tests
 go test ./...
 
-# Run the program directly
+# Run the interactive CLI
 go run ./cmd/toy-blockchain
+
+# Run a configured network node
+go run ./cmd/node --addr=:8081 --peers=http://localhost:8082
 
 # Or build a binary first
 go build -o toy-blockchain ./cmd/toy-blockchain
-./toy-blockchain
+go build -o blockchain-node ./cmd/node
 ```
 
-The program starts an interactive menu. Just follow the on-screen options — no
+The CLI program starts an interactive menu. Just follow the on-screen options — no
 extra setup is required. On first run it creates a `data/` folder next to the
 binary to store the chain and wallet files.
+
+### Network node service
+
+The project also includes a small HTTP node service that can run as an independent
+process on its own port and connect to peers.
+
+```bash
+# Start node A
+go run ./cmd/node --addr=:8081 --peers=http://localhost:8082
+
+# Start node B
+go run ./cmd/node --addr=:8082 --peers=http://localhost:8081,http://localhost:8083
+
+# Start node C
+go run ./cmd/node --addr=:8083 --peers=http://localhost:8082
+```
+
+Endpoints exposed by each node:
+
+- `POST /tx` – submit and gossip a transaction
+- `POST /block` – submit and gossip a mined block
+- `GET /peers` – list known peers
+- `GET /status` – current height, head hash, and mempool size
+- `GET /sync/height` – current height and head hash for chain sync
+- `GET /sync/block/{index}` – fetch one block by index
 
 ### Command-line flags
 

@@ -11,20 +11,23 @@ func TestOverspendingTransactionRejected(t *testing.T) {
 	bc := chain.NewBlockchain(1)
 	l := NewLedger(bc)
 
-	bc.AddTransaction(block.Transaction{Sender: "FAUCET", Recipient: "Alice", Amount: 100})
-	bc.MinePendingTransactions(5)
-
-	initialBalance := l.GetBalance("Alice")
-	if initialBalance != 100 {
-		t.Fatalf("Expected Alice to have balance 100, got %d", initialBalance)
-	}
-
+	// 1. මුලින්ම Keypair එක සහ Address එක හදාගන්න
 	privKey, pubKey, _ := wallet.GenerateKeyPair()
 	addr, err := wallet.AddressFromPublicKey(pubKey)
 	if err != nil {
 		t.Fatalf("failed to derive address: %v", err)
 	}
 
+	// 2. FAUCET එකෙන් අර හදාගත් 'addr' එකට Coins 100ක් යවන්න (Alice ට නෙවෙයි)
+	bc.AddTransaction(block.Transaction{Sender: "FAUCET", Recipient: addr, Amount: 100})
+	bc.MinePendingTransactions(5)
+
+	initialBalance := l.GetBalance(addr)
+	if initialBalance != 100 {
+		t.Fatalf("Expected addr to have balance 100, got %d", initialBalance)
+	}
+
+	// 3. දැන් 'addr' එකෙන් (100ක් තියෙන) 150ක් යවන්න උත්සාහ කරන්න
 	tx := block.Transaction{
 		Sender:    addr,
 		Recipient: "Bob",
@@ -44,7 +47,7 @@ func TestOverspendingTransactionRejected(t *testing.T) {
 		t.Errorf("Expected 'insufficient balance' error, but got: %v", err)
 	}
 
-	currentBalance := l.GetBalance("Alice")
+	currentBalance := l.GetBalance(addr)
 	if currentBalance != 100 {
 		t.Errorf("Expected account balance to remain 100, got %d", currentBalance)
 	}

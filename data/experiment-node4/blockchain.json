@@ -1,0 +1,117 @@
+{
+  "blocks": [
+    {
+      "index": 0,
+      "timestamp": 0,
+      "transactions": [],
+      "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "nonce": 0,
+      "merkle_root": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "difficulty": 0,
+      "hash": "8dbea555172982f531bcc7bff2543011122b00d928306029deb1fece658b72ff",
+      "is_immutable": true
+    },
+    {
+      "index": 1,
+      "timestamp": 1787113125,
+      "transactions": [
+        {
+          "sender": "FAUCET",
+          "recipient": "12e50da4ec5e6d57a0423bbdd4f9eafd2bcbfbdf417363d4e4a4f0bf72854a23",
+          "amount": 100,
+          "fee": 0,
+          "nonce": 0,
+          "public_key": "SYSTEM_FAUCET_PUBLIC_KEY",
+          "signature": "SYSTEM_AUTHORIZED_NO_SIGNATURE"
+        },
+        {
+          "sender": "COINBASE",
+          "recipient": "e601987cf8a70f03142093ce9171ed012a84bc6d12d221a74e7f3bbbc340dd3d",
+          "amount": 50,
+          "fee": 0,
+          "nonce": 0,
+          "public_key": "",
+          "signature": ""
+        }
+      ],
+      "previous_hash": "8dbea555172982f531bcc7bff2543011122b00d928306029deb1fece658b72ff",
+      "nonce": 3897,
+      "merkle_root": "1937d907328221040141d7fd12be7816cd5e075e2dd30007927a517843828d54",
+      "difficulty": 3,
+      "hash": "0009e565414173c50388992b8777cc5dbd2c3205c9400032733c77244aba2bd7",
+      "is_immutable": true
+    },
+    {
+      "index": 2,
+      "timestamp": 1787131073,
+      "transactions": [
+        {
+          "sender": "FAUCET",
+          "recipient": "12e50da4ec5e6d57a0423bbdd4f9eafd2bcbfbdf417363d4e4a4f0bf72854a23",
+          "amount": 1,
+          "fee": 0,
+          "nonce": 0,
+          "public_key": "SYSTEM_FAUCET_PUBLIC_KEY",
+          "signature": "SYSTEM_AUTHORIZED_NO_SIGNATURE"
+        },
+        {
+          "sender": "COINBASE",
+          "recipient": "e601987cf8a70f03142093ce9171ed012a84bc6d12d221a74e7f3bbbc340dd3d",
+          "amount": 50,
+          "fee": 0,
+          "nonce": 0,
+          "public_key": "",
+          "signature": ""
+        }
+      ],
+      "previous_hash": "0009e565414173c50388992b8777cc5dbd2c3205c9400032733c77244aba2bd7",
+      "nonce": 5615,
+      "merkle_root": "04e3ae0d07081c1c65a91386bc8851de45f0afadc192be4520a290f4760c361e",
+      "difficulty": 3,
+      "hash": "00096a0c03757ebb0a0c1a734c8d7d482783b591a39e8210b9ae19128b7e1ad3",
+      "is_immutable": true
+    },
+    {
+      "index": 3,
+      "timestamp": 1787131084,
+      "transactions": [
+        {
+          "sender": "FAUCET",
+          "recipient": "c4c2b2e34710d5072a7bb7ffe401bd18eaff9a038b4d35310fb7bf57755962d0",
+          "amount": 1,
+          "fee": 0,
+          "nonce": 0,
+          "public_key": "SYSTEM_FAUCET_PUBLIC_KEY",
+          "signature": "SYSTEM_AUTHORIZED_NO_SIGNATURE"
+        },
+        {
+          "sender": "COINBASE",
+          "recipient": "e601987cf8a70f03142093ce9171ed012a84bc6d12d221a74e7f3bbbc340dd3d",
+          "amount": 50,
+          "fee": 0,
+          "nonce": 0,
+          "public_key": "",
+          "signature": ""
+        }
+      ],
+      "previous_hash": "00096a0c03757ebb0a0c1a734c8d7d482783b591a39e8210b9ae19128b7e1ad3",
+      "nonce": 6617,
+      "merkle_root": "acbcea4c12f4140bd66d8f3695fdd18973191a7cc9486aac13039242faf16bfc",
+      "difficulty": 3,
+      "hash": "00074d7a0184e0780d3f4827a0dbe61c8924543ab9d66960895b10f9136cc6b2",
+      "is_immutable": true
+    }
+  ],
+  "difficulty": 3,
+  "base_difficulty": 3,
+  "difficulty_config": {
+    "RetargetInterval": 10,
+    "ExpectedBlockTimeSeconds": 10
+  },
+  "pending_transactions": [],
+  "reward_amount": 50,
+  "fee_per_transaction": 0,
+  "miner_address": "",
+  "miner_workers": 0,
+  "miner_timeout": 10000000000
+}

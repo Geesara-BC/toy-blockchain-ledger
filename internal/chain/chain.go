@@ -23,6 +23,7 @@ type MiningBenchmarkResult struct {
 }
 
 type Blockchain struct {
+	mu                     sync.RWMutex        `json:"-"`
 	Blocks                 []*block.Block      `json:"blocks"`
 	Difficulty             int                 `json:"difficulty"`
 	BaseDifficulty         int                 `json:"base_difficulty"`
@@ -72,6 +73,8 @@ func NewBlockchainWithDifficultyConfig(difficulty int, config DifficultyConfig) 
 // new new new
 
 func (bc *Blockchain) rehydrate() {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	if bc.accountBalances == nil {
 		bc.accountBalances = make(map[string]int64)
 	}
@@ -128,6 +131,9 @@ func (bc *Blockchain) PrepareForPersistence() {
 }
 
 func (bc *Blockchain) rebuildState() {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+
 	balances := make(map[string]int64)
 	nonces := make(map[string]int64)
 	pendingOutbound := make(map[string]int64)
@@ -193,6 +199,8 @@ func (bc *Blockchain) removePendingTransaction(pendingOutbound, pendingNonceCoun
 // new new new
 
 func (bc *Blockchain) populateMerkleRoots() {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	for _, b := range bc.Blocks {
 		if b == nil {
 			continue
@@ -203,6 +211,8 @@ func (bc *Blockchain) populateMerkleRoots() {
 
 // GetBlocks returns deep copies of blocks to prevent modification (true immutability)
 func (bc *Blockchain) GetBlocks() []block.Block {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 	copies := make([]block.Block, len(bc.Blocks))
 	for i, b := range bc.Blocks {
 		copies[i] = *b // Create deep copies
@@ -212,6 +222,8 @@ func (bc *Blockchain) GetBlocks() []block.Block {
 
 // TamperBlockForTesting allows modifying blocks (for testing only)
 func (bc *Blockchain) TamperBlockForTesting(blockIndex int, modifyFunc func(*block.Block)) {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	if blockIndex < len(bc.Blocks) {
 		modifyFunc(bc.Blocks[blockIndex])
 	}
@@ -219,6 +231,8 @@ func (bc *Blockchain) TamperBlockForTesting(blockIndex int, modifyFunc func(*blo
 
 // ValidateBlockModification ensures blocks cannot be modified once committed
 func (bc *Blockchain) ValidateBlockModification(blockIndex int) error {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 	if blockIndex < len(bc.Blocks) && bc.Blocks[blockIndex].IsImmutable {
 		return errors.New("FORBIDDEN: This block is immutable and cannot be modified")
 	}
@@ -226,51 +240,83 @@ func (bc *Blockchain) ValidateBlockModification(blockIndex int) error {
 }
 
 func (bc *Blockchain) GetLatestBlock() *block.Block {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 	return bc.Blocks[len(bc.Blocks)-1]
 }
 
 func (bc *Blockchain) GetBalances() map[string]int64 {
 	bc.rehydrate()
+	bc.mu.RLock()
 	if bc.accountBalances == nil {
+		bc.mu.RUnlock()
 		bc.rebuildState()
+		bc.mu.RLock()
 	}
 	balances := make(map[string]int64, len(bc.accountBalances))
 	for account, balance := range bc.accountBalances {
 		balances[account] = balance
 	}
+	bc.mu.RUnlock()
 	return balances
 }
 
 func (bc *Blockchain) GetBalance(account string) int64 {
 	bc.rehydrate()
+	bc.mu.RLock()
 	if bc.accountBalances == nil {
+		bc.mu.RUnlock()
 		bc.rebuildState()
+		bc.mu.RLock()
 	}
-	return bc.accountBalances[account]
+	val := bc.accountBalances[account]
+	bc.mu.RUnlock()
+	return val
 }
 
 func (bc *Blockchain) PendingOutbound(account string) int64 {
 	bc.rehydrate()
+	bc.mu.RLock()
 	if bc.pendingOutboundTotals == nil {
+		bc.mu.RUnlock()
 		bc.rebuildState()
+		bc.mu.RLock()
 	}
-	return bc.pendingOutboundTotals[account]
+	val := bc.pendingOutboundTotals[account]
+	bc.mu.RUnlock()
+	return val
 }
 
 func (bc *Blockchain) GetAccountNonce(account string) int64 {
 	bc.rehydrate()
+	bc.mu.RLock()
 	if bc.accountNonces == nil {
+		bc.mu.RUnlock()
 		bc.rebuildState()
+		bc.mu.RLock()
 	}
-	return bc.accountNonces[account]
+	val := bc.accountNonces[account]
+	bc.mu.RUnlock()
+	return val
 }
 
 func (bc *Blockchain) GetPendingAccountNonce(account string) int64 {
 	bc.rehydrate()
+	bc.mu.RLock()
 	if bc.accountNonces == nil || bc.pendingNonceCounts == nil {
+		bc.mu.RUnlock()
 		bc.rebuildState()
+		bc.mu.RLock()
 	}
-	return bc.accountNonces[account] + bc.pendingNonceCounts[account]
+	val := bc.accountNonces[account] + bc.pendingNonceCounts[account]
+	bc.mu.RUnlock()
+	return val
+}
+
+func (bc *Blockchain) GetPendingTransactionCount() int {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
+	return len(bc.PendingTransactions)
 }
 
 // func (bc *Blockchain) AddTransaction(tx block.Transaction) {
@@ -400,6 +446,8 @@ func (bc *Blockchain) AddTransaction(tx block.Transaction) error {
 	if err := bc.ValidateTransaction(tx); err != nil {
 		return err
 	}
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	bc.PendingTransactions = append(bc.PendingTransactions, tx)
 	bc.applyPendingTransaction(bc.pendingOutboundTotals, bc.pendingNonceCounts, tx)
 	return nil
@@ -409,6 +457,8 @@ func (bc *Blockchain) AddTransaction(tx block.Transaction) error {
 
 func (bc *Blockchain) RegisterMiner(address string) error {
 	bc.rehydrate()
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	if err := bc.MinerRegistry.Register(address); err != nil {
 		return err
 	}
@@ -419,6 +469,8 @@ func (bc *Blockchain) RegisterMiner(address string) error {
 
 func (bc *Blockchain) IsMinerRegistered(address string) bool {
 	bc.rehydrate()
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 	if bc.MinerRegistry == nil {
 		return false
 	}
@@ -427,6 +479,8 @@ func (bc *Blockchain) IsMinerRegistered(address string) bool {
 
 func (bc *Blockchain) RegisteredMiners() []string {
 	bc.rehydrate()
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 	if bc.MinerRegistry == nil {
 		return []string{}
 	}
@@ -437,31 +491,29 @@ func (bc *Blockchain) RegisteredMiners() []string {
 
 func (bc *Blockchain) MinePendingTransactions(maxBlockSize int) (*block.Block, error) {
 	bc.rehydrate()
+
+	// Snapshot pending transactions and latest block without holding the write lock
+	bc.mu.RLock()
 	if len(bc.PendingTransactions) == 0 {
+		bc.mu.RUnlock()
 		return nil, errors.New("no pending transactions to mine")
 	}
 	txCount := len(bc.PendingTransactions)
 	if txCount > maxBlockSize {
 		txCount = maxBlockSize
 	}
-
-	transactionsToMine := bc.PendingTransactions[:txCount]
-
-	latestBlock := bc.GetLatestBlock()
-
-	//new
-
+	transactionsToMine := make([]block.Transaction, txCount)
+	copy(transactionsToMine, bc.PendingTransactions[:txCount])
+	latestBlock := *bc.Blocks[len(bc.Blocks)-1]
 	selectedMiner := bc.MinerAddress
+	minerWorkers := bc.MinerWorkers
+	minerTimeout := bc.MinerTimeout
+	bc.mu.RUnlock()
+
 	if selectedMiner == "" {
 		registeredMiners := bc.RegisteredMiners()
 		if len(registeredMiners) > 0 {
 			selectedMiner = registeredMiners[0]
-			bc.MinerAddress = selectedMiner
-		}
-	} else if !bc.IsMinerRegistered(selectedMiner) {
-		registeredMiners := bc.RegisteredMiners()
-		if len(registeredMiners) > 0 {
-			return nil, errors.New("miner address is not registered")
 		}
 	}
 
@@ -492,9 +544,13 @@ func (bc *Blockchain) MinePendingTransactions(maxBlockSize int) (*block.Block, e
 		Difficulty:   nextDifficulty,
 	}
 	targetPrefix := strings.Repeat("0", nextDifficulty)
-	workerCount := bc.MinerWorkers
+	workerCount := minerWorkers
 	if workerCount <= 0 {
 		workerCount = determineMiningWorkers()
+	}
+	// use minerTimeout if set
+	if minerTimeout > 0 {
+		bc.MinerTimeout = minerTimeout
 	}
 	minedBlock, _, err := bc.mineBlockConcurrent(newBlock, targetPrefix, workerCount)
 	if err != nil {
@@ -503,6 +559,10 @@ func (bc *Blockchain) MinePendingTransactions(maxBlockSize int) (*block.Block, e
 
 	minedBlock.Transactions = rewardedTransactions
 	minedBlock.IsImmutable = true
+
+	// Commit results while holding write lock
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	bc.Blocks = append(bc.Blocks, minedBlock)
 	for _, tx := range transactionsToMine {
 		bc.removePendingTransaction(bc.pendingOutboundTotals, bc.pendingNonceCounts, tx)
@@ -706,33 +766,40 @@ func (bc *Blockchain) mineBlockConcurrent(template *block.Block, targetPrefix st
 
 	select {
 	case res := <-results:
+		totalAttempts := atomic.LoadInt64(&attempts)
 		if res.err != nil {
-			return nil, attempts, res.err
+			return nil, totalAttempts, res.err
 		}
-		return res.block, attempts, nil
+		return res.block, totalAttempts, nil
 	case <-ctx.Done():
 		// if a worker just found a result around the same time as ctx.Done,
 		// try to read it before returning to avoid missing a valid result.
 		select {
 		case res := <-results:
+			totalAttempts := atomic.LoadInt64(&attempts)
 			if res.err != nil {
-				return nil, attempts, res.err
+				return nil, totalAttempts, res.err
 			}
-			return res.block, attempts, nil
+			return res.block, totalAttempts, nil
 		default:
 		}
 
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, attempts, fmt.Errorf("mining timed out: %w", ctx.Err())
+			totalAttempts := atomic.LoadInt64(&attempts)
+			return nil, totalAttempts, fmt.Errorf("mining timed out: %w", ctx.Err())
 		}
 
-		return nil, attempts, fmt.Errorf("mining cancelled")
+		totalAttempts := atomic.LoadInt64(&attempts)
+		return nil, totalAttempts, fmt.Errorf("mining cancelled")
 	}
 }
 
 // new
 
 func (bc *Blockchain) IsValid() (bool, int) {
+
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 
 	if len(bc.Blocks) > 0 {
 		genesisBlock := bc.Blocks[0]
