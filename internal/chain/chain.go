@@ -558,6 +558,7 @@ func (bc *Blockchain) MinePendingTransactions(maxBlockSize int) (*block.Block, e
 	}
 
 	minedBlock.Transactions = rewardedTransactions
+	minedBlock.MerkleRootValue = minedBlock.MerkleRoot()
 	minedBlock.IsImmutable = true
 
 	// Commit results while holding write lock
@@ -823,6 +824,12 @@ func (bc *Blockchain) IsValid() (bool, int) {
 	for i := 1; i < len(bc.Blocks); i++ {
 		current := bc.Blocks[i]
 		previous := bc.Blocks[i-1]
+
+		// 1. Transactions වලින් Merkle Root එක ගණනය කර Save කර ඇති අගය සමඟ සැසඳීම:
+		recalculatedMerkle := current.MerkleRoot()
+		if current.MerkleRootValue != recalculatedMerkle {
+			return false, current.Index
+		}
 
 		if current.Hash != current.CalculateHash() {
 			return false, current.Index

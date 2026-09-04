@@ -202,7 +202,7 @@ func (n *Node) markBlockSeen(b interface{}) {
 func (n *Node) SetPeers(peers []string) {
 	n.peersMu.Lock()
 	defer n.peersMu.Unlock()
-	n.peers = append([]string{}, peers...)
+	n.peers = n.distinctPeers(peers)
 }
 
 func (n *Node) Peers() []string {
@@ -212,6 +212,10 @@ func (n *Node) Peers() []string {
 }
 
 func (n *Node) addPeer(peer string) {
+	peer = strings.TrimRight(peer, "/")
+	if peer == "" {
+		return
+	}
 	n.peersMu.Lock()
 	defer n.peersMu.Unlock()
 	for _, existingPeer := range n.peers {
@@ -220,6 +224,100 @@ func (n *Node) addPeer(peer string) {
 		}
 	}
 	n.peers = append(n.peers, peer)
+}
+
+func (n *Node) removePeer(peer string) {
+	peer = strings.TrimRight(peer, "/")
+	if peer == "" {
+		return
+	}
+	n.peersMu.Lock()
+	defer n.peersMu.Unlock()
+	filtered := make([]string, 0, len(n.peers))
+	for _, existingPeer := range n.peers {
+		if existingPeer != peer {
+			filtered = append(filtered, existingPeer)
+		}
+	}
+	n.peers = filtered
+}
+
+func (n *Node) exchangePeerList(peer string) error {
+	peer = strings.TrimRight(peer, "/")
+	if peer == "" {
+		return nil
+	}
+	resp, err := n.client.Get(peer + "/peers")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("peer list fetch failed: %s", resp.Status)
+	}
+	var remote []string
+	if err := json.NewDecoder(resp.Body).Decode(&remote); err != nil {
+		return err
+	}
+	merged := n.distinctPeers(append(n.Peers(), remote...))
+	n.SetPeers(merged)
+	return nil
+}
+
+// DiscoverPeers walks peer lists reachable from seed and stops at known URLs.
+func (n *Node) DiscoverPeers(seed string) error {
+	seed = strings.TrimRight(strings.TrimSpace(seed), "/")
+	if seed == "" {
+		return nil
+	}
+
+	queue := []string{seed}
+	visited := make(map[string]struct{})
+	var firstErr error
+	for len(queue) > 0 {
+		peer := queue[0]
+		queue = queue[1:]
+		if _, seen := visited[peer]; seen {
+			continue
+		}
+		visited[peer] = struct{}{}
+
+		resp, err := n.client.Get(peer + "/peers")
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			resp.Body.Close()
+			if firstErr == nil {
+				firstErr = fmt.Errorf("peer list fetch failed: %s", resp.Status)
+			}
+			continue
+		}
+
+		var discovered []string
+		err = json.NewDecoder(resp.Body).Decode(&discovered)
+		resp.Body.Close()
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		for _, discoveredPeer := range discovered {
+			discoveredPeer = strings.TrimRight(strings.TrimSpace(discoveredPeer), "/")
+			if discoveredPeer == "" {
+				continue
+			}
+			n.addPeer(discoveredPeer)
+			if _, seen := visited[discoveredPeer]; !seen {
+				queue = append(queue, discoveredPeer)
+			}
+		}
+	}
+	return firstErr
 }
 
 func (n *Node) distinctPeers(peers []string) []string {

@@ -6,10 +6,13 @@ import (
 	"log"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 
 	"toy-blockchain/internal/block"
 	"toy-blockchain/internal/chain"
+	"toy-blockchain/internal/merkle"
+	"toy-blockchain/internal/storage"
 )
 
 func writeJSONError(w http.ResponseWriter, msg string, code int) {
@@ -21,11 +24,14 @@ func writeJSONError(w http.ResponseWriter, msg string, code int) {
 func (n *Node) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/tx", n.handleTx)
+	mux.HandleFunc("/tx/proof", n.handleTxProof)
+	mux.HandleFunc("/proof/tx/", n.handleProof)
 	mux.HandleFunc("/block", n.handleBlock)
 	mux.HandleFunc("/mine", n.handleMine)
 	mux.HandleFunc("/wallet", n.handleWallet)
 	mux.HandleFunc("/wallets", n.handleWallet)
 	mux.HandleFunc("/peers", n.handlePeers)
+	mux.HandleFunc("/chain", n.handleChain)
 	mux.HandleFunc("/sync/height", n.handleSyncHeight)
 	mux.HandleFunc("/sync/block/", n.handleSyncBlock)
 	mux.HandleFunc("/balances", n.handleBalances)
@@ -35,6 +41,119 @@ func (n *Node) Handler() http.Handler {
 	return mux
 }
 
+func (n *Node) handleTxProof(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, "method", http.StatusMethodNotAllowed)
+		return
+	}
+	blockIndex, txIndex, err := parseBlockAndTxIndexes(r)
+	if err != nil {
+		writeJSONError(w, "bad request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if n.BC == nil || blockIndex < 0 || blockIndex >= len(n.BC.Blocks) {
+		writeJSONError(w, "block not found", http.StatusNotFound)
+		return
+	}
+	b := n.BC.Blocks[blockIndex]
+	if b == nil {
+		writeJSONError(w, "block not found", http.StatusNotFound)
+		return
+	}
+	if txIndex < 0 || txIndex >= len(b.Transactions) {
+		writeJSONError(w, "transaction index out of range", http.StatusBadRequest)
+		return
+	}
+	if b.MerkleRootValue == "" {
+		b.MerkleRootValue = b.MerkleRoot()
+	}
+	proof, err := b.MerkleProofForTransaction(txIndex)
+	if err != nil {
+		writeJSONError(w, "proof generation failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	root := b.MerkleRootValue
+	if root == "" {
+		root = b.MerkleRoot()
+	}
+	tx := b.Transactions[txIndex]
+	verified := merkle.VerifyProof([]byte(tx.Payload()), proof, root, txIndex)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"block_index": blockIndex,
+		"tx_index":    txIndex,
+		"merkle_root": root,
+		"proof":       proof,
+		"verified":    verified,
+		"transaction": tx,
+	})
+}
+
+func (n *Node) handleProof(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, "method", http.StatusMethodNotAllowed)
+		return
+	}
+	blockIndex, txIndex, err := parseBlockAndTxIndexes(r)
+	if err != nil {
+		writeJSONError(w, "bad request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	n.handleTxProof(w, r)
+	_ = blockIndex
+	_ = txIndex
+}
+
+func parseBlockAndTxIndexes(r *http.Request) (int, int, error) {
+	if values := r.URL.Query(); values != nil {
+		blockValue := values.Get("block_index")
+		if blockValue == "" {
+			blockValue = values.Get("block")
+		}
+		txValue := values.Get("tx_index")
+		if txValue == "" {
+			txValue = values.Get("tx")
+		}
+		if blockValue != "" && txValue != "" {
+			blockIndex, err := strconv.Atoi(blockValue)
+			if err != nil {
+				return 0, 0, err
+			}
+			txIndex, err := strconv.Atoi(txValue)
+			if err != nil {
+				return 0, 0, err
+			}
+			return blockIndex, txIndex, nil
+		}
+	}
+
+	trimmed := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) >= 4 && parts[0] == "proof" && parts[1] == "tx" {
+		blockIndex, err := strconv.Atoi(parts[2])
+		if err != nil {
+			return 0, 0, err
+		}
+		txIndex, err := strconv.Atoi(parts[3])
+		if err != nil {
+			return 0, 0, err
+		}
+		return blockIndex, txIndex, nil
+	}
+	if len(parts) >= 5 && parts[0] == "block" && parts[2] == "tx" && parts[4] == "proof" {
+		blockIndex, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return 0, 0, err
+		}
+		txIndex, err := strconv.Atoi(parts[3])
+		if err != nil {
+			return 0, 0, err
+		}
+		return blockIndex, txIndex, nil
+	}
+	return 0, 0, fmt.Errorf("missing block/tx indexes")
+}
+
 func (n *Node) handleVerify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, "method", http.StatusMethodNotAllowed)
@@ -42,7 +161,16 @@ func (n *Node) handleVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	valid, faulty := n.BC.IsValid()
+	bc := n.BC
+	if n.dbPath != "" {
+		loaded, err := storage.LoadFromFile(n.dbPath)
+		if err != nil {
+			writeJSONError(w, fmt.Sprintf("failed to load blockchain: %v", err), http.StatusInternalServerError)
+			return
+		}
+		bc = loaded
+	}
+	valid, faulty := bc.IsValid()
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"valid": valid, "faulty_index": faulty})
 }
 
@@ -336,9 +464,7 @@ func (n *Node) handleBlock(w http.ResponseWriter, r *http.Request) {
 func (n *Node) handlePeers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		n.peersMu.RLock()
-		defer n.peersMu.RUnlock()
-		_ = json.NewEncoder(w).Encode(n.peers)
+		_ = json.NewEncoder(w).Encode(n.Peers())
 	case http.MethodPost:
 		var p struct {
 			Addr string `json:"addr"`
@@ -351,12 +477,48 @@ func (n *Node) handlePeers(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, "empty", http.StatusBadRequest)
 			return
 		}
-		n.addPeer(p.Addr)
-		go func(addr string) { _ = n.SyncFrom(addr) }(p.Addr)
+		peerURL := strings.TrimRight(p.Addr, "/")
+		n.addPeer(peerURL)
+		go func(addr string) {
+			if err := n.SyncFrom(addr); err == nil {
+				_ = n.exchangePeerList(addr)
+			}
+		}(peerURL)
 		w.WriteHeader(http.StatusOK)
 	default:
 		writeJSONError(w, "method", http.StatusMethodNotAllowed)
 	}
+}
+
+func (n *Node) handleChain(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, "method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	if n.BC == nil {
+		_ = json.NewEncoder(w).Encode([]map[string]interface{}{})
+		return
+	}
+
+	chainDump := make([]map[string]interface{}, 0, len(n.BC.Blocks))
+	for _, b := range n.BC.Blocks {
+		if b == nil {
+			continue
+		}
+		chainDump = append(chainDump, map[string]interface{}{
+			"index":             b.Index,
+			"timestamp":         b.Timestamp,
+			"previous_hash":     b.PreviousHash,
+			"merkle_root":       b.MerkleRootValue,
+			"difficulty":        b.Difficulty,
+			"hash":              b.Hash,
+			"transaction_count": len(b.Transactions),
+		})
+	}
+	_ = json.NewEncoder(w).Encode(chainDump)
 }
 
 func (n *Node) handleSyncHeight(w http.ResponseWriter, r *http.Request) {

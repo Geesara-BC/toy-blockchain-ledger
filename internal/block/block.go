@@ -59,6 +59,17 @@ func (b *Block) MerkleRoot() string {
 	return merkle.CalculateMerkleRoot(leaves)
 }
 
+func (b *Block) MerkleProofForTransaction(txIndex int) ([]string, error) {
+	if txIndex < 0 || txIndex >= len(b.Transactions) {
+		return nil, fmt.Errorf("transaction index %d out of range for block with %d transactions", txIndex, len(b.Transactions))
+	}
+	leaves := make([][]byte, len(b.Transactions))
+	for i, tx := range b.Transactions {
+		leaves[i] = []byte(tx.Payload())
+	}
+	return merkle.GenerateProof(leaves, txIndex)
+}
+
 func (b *Block) CalculateHash() string {
 
 	blockHash := blockForHash{

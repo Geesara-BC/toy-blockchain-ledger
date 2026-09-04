@@ -61,3 +61,32 @@ func TestCalculateMerkleRootOddLeaves(t *testing.T) {
 		t.Fatalf("expected merkle root %s, got %s", expected, got)
 	}
 }
+
+func TestGenerateAndVerifyProof(t *testing.T) {
+	leaves := [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d")}
+	root := CalculateMerkleRoot(leaves)
+
+	proof, err := GenerateProof(leaves, 2)
+	if err != nil {
+		t.Fatalf("generate proof returned error: %v", err)
+	}
+	if len(proof) == 0 {
+		t.Fatal("expected inclusion proof for transaction at index 2")
+	}
+	if !VerifyProof(leaves[2], proof, root, 2) {
+		t.Fatalf("proof verification failed for root %s", root)
+	}
+}
+
+func TestGenerateAndVerifyProofOddLeafCount(t *testing.T) {
+	leaves := [][]byte{[]byte("a"), []byte("b"), []byte("c")}
+	root := CalculateMerkleRoot(leaves)
+
+	proof, err := GenerateProof(leaves, 2)
+	if err != nil {
+		t.Fatalf("generate proof returned error: %v", err)
+	}
+	if !VerifyProof(leaves[2], proof, root, 2) {
+		t.Fatalf("odd-leaf proof verification failed for root %s", root)
+	}
+}

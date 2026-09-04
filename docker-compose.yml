@@ -1,0 +1,69 @@
+services:
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - --addr=:8081
+      - --peers=http://node2:8082
+      - --db-path=/app/data/node1/blockchain.json
+    ports:
+      - "8081:8081"
+    volumes:
+      - node1-data:/app/data/node1
+      - shared-wallets:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8081/status"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - --addr=:8082
+      - --peers=http://node1:8081,http://node3:8083
+      - --db-path=/app/data/node2/blockchain.json
+    ports:
+      - "8082:8082"
+    volumes:
+      - node2-data:/app/data/node2
+      - shared-wallets:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8082/status"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  node3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - --addr=:8083
+      - --peers=http://node2:8082
+      - --db-path=/app/data/node3/blockchain.json
+    ports:
+      - "8083:8083"
+    volumes:
+      - node3-data:/app/data/node3
+      - shared-wallets:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8083/status"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:
+  shared-wallets:

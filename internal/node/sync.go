@@ -79,14 +79,25 @@ func (n *Node) SyncFrom(peer string) error {
 	}
 
 	n.mu.Lock()
-	defer n.mu.Unlock()
 	if err := n.BC.ReplaceWithLongestChain(candidate); err != nil {
+		currentLen := len(n.BC.Blocks)
+		n.mu.Unlock()
+		if errors.Is(err, chain.ErrShorterChain) && len(candidate.Blocks) == currentLen {
+			if discoveryErr := n.DiscoverPeers(peer); discoveryErr != nil {
+				log.Printf("[Node discovery] failed from %s: %v", peer, discoveryErr)
+			}
+			return nil
+		}
 		return err
 	}
 	if n.dbPath != "" {
 		if err := n.Save(); err != nil {
 			log.Printf("[Node persistence] failed to save replaced chain: %v", err)
 		}
+	}
+	n.mu.Unlock()
+	if err := n.DiscoverPeers(peer); err != nil {
+		log.Printf("[Node discovery] failed from %s: %v", peer, err)
 	}
 	return nil
 }

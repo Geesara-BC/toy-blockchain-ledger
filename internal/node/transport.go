@@ -51,6 +51,7 @@ func (n *Node) gossipToPeers(path string, payload interface{}) {
 
 			resp, err := n.client.Do(req)
 			if err != nil {
+				n.removePeer(targetURL)
 				log.Printf("[Gossip Error] peer %s unreachable: %v", targetURL, err)
 				return
 			}
@@ -58,6 +59,7 @@ func (n *Node) gossipToPeers(path string, payload interface{}) {
 
 			if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 				_, _ = io.Copy(io.Discard, resp.Body)
+				n.removePeer(targetURL)
 				log.Printf("[Gossip Error] peer %s returned status %s", targetURL, resp.Status)
 				return
 			}

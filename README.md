@@ -62,6 +62,36 @@ Endpoints exposed by each node:
 - `GET /sync/height` – current height and head hash for chain sync
 - `GET /sync/block/{index}` – fetch one block by index
 
+### Docker Compose cluster
+
+Docker Compose can build and start the complete three-node network with one command:
+
+```bash
+docker compose up --build -d
+```
+
+The nodes are available from the host at `http://localhost:8081`,
+`http://localhost:8082`, and `http://localhost:8083`. Inside the Compose network,
+nodes connect through the service names `node1`, `node2`, and `node3`; peer
+discovery then expands each node's peer list transitively from those seed peers.
+
+Check the cluster and follow logs with:
+
+```bash
+docker compose ps
+docker compose logs -f node1 node2 node3
+```
+
+Stop the cluster while retaining its chain data with:
+
+```bash
+docker compose down
+```
+
+The chain data is stored in separate named volumes for each node, while the
+shared wallet store uses its own named volume. To remove all persisted Compose
+data and start fresh, run `docker compose down -v`.
+
 ### Command-line flags
 
 These can be passed when starting the program, for example:
