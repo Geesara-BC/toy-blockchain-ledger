@@ -23,11 +23,16 @@ type MiningBenchmarkResult struct {
 }
 
 type Blockchain struct {
+	mu                     sync.RWMutex        `json:"-"`
 	Blocks                 []*block.Block      `json:"blocks"`
 	Difficulty             int                 `json:"difficulty"`
 	BaseDifficulty         int                 `json:"base_difficulty"`
 	DifficultyConfig       DifficultyConfig    `json:"difficulty_config"`
 	PendingTransactions    []block.Transaction `json:"pending_transactions"`
+	accountBalances        map[string]int64    `json:"-"`
+	accountNonces          map[string]int64    `json:"-"`
+	pendingOutboundTotals  map[string]int64    `json:"-"`
+	pendingNonceCounts     map[string]int64    `json:"-"`
 	RewardEngine           *miner.RewardEngine `json:"-"`
 	MinerRegistry          *miner.Registry     `json:"-"`
 	RewardAmount           int64               `json:"reward_amount"`
@@ -49,6 +54,10 @@ func NewBlockchainWithDifficultyConfig(difficulty int, config DifficultyConfig) 
 		BaseDifficulty:         difficulty,
 		DifficultyConfig:       config,
 		PendingTransactions:    []block.Transaction{},
+		accountBalances:        make(map[string]int64),
+		accountNonces:          make(map[string]int64),
+		pendingOutboundTotals:  make(map[string]int64),
+		pendingNonceCounts:     make(map[string]int64),
 		RewardAmount:           50,
 		FeePerTransaction:      0,
 		RegisteredMinerAddress: []string{},
@@ -64,6 +73,20 @@ func NewBlockchainWithDifficultyConfig(difficulty int, config DifficultyConfig) 
 // new new new
 
 func (bc *Blockchain) rehydrate() {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	if bc.accountBalances == nil {
+		bc.accountBalances = make(map[string]int64)
+	}
+	if bc.accountNonces == nil {
+		bc.accountNonces = make(map[string]int64)
+	}
+	if bc.pendingOutboundTotals == nil {
+		bc.pendingOutboundTotals = make(map[string]int64)
+	}
+	if bc.pendingNonceCounts == nil {
+		bc.pendingNonceCounts = make(map[string]int64)
+	}
 	if bc.RewardEngine == nil {
 		bc.RewardEngine = miner.NewRewardEngine(bc.RewardAmount, miner.NewFixedFeePolicy(bc.FeePerTransaction))
 	}
@@ -91,10 +114,12 @@ func (bc *Blockchain) syncRegisteredMiners() {
 
 func (bc *Blockchain) RehydrateForLoad() {
 	bc.rehydrate()
+	bc.rebuildState()
 }
 
 func (bc *Blockchain) PrepareForPersistence() {
 	bc.rehydrate()
+	bc.rebuildState()
 	if bc.RewardEngine != nil {
 		bc.RewardAmount = bc.RewardEngine.BlockReward
 		if feePolicy, ok := bc.RewardEngine.FeePolicy.(*miner.FixedFeePolicy); ok {
@@ -105,9 +130,77 @@ func (bc *Blockchain) PrepareForPersistence() {
 	bc.populateMerkleRoots()
 }
 
+func (bc *Blockchain) rebuildState() {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+
+	balances := make(map[string]int64)
+	nonces := make(map[string]int64)
+	pendingOutbound := make(map[string]int64)
+	pendingNonceCounts := make(map[string]int64)
+
+	for _, b := range bc.Blocks {
+		if b == nil {
+			continue
+		}
+		for _, tx := range b.Transactions {
+			bc.applyCommittedTransaction(balances, nonces, tx)
+		}
+	}
+
+	for _, tx := range bc.PendingTransactions {
+		bc.applyPendingTransaction(pendingOutbound, pendingNonceCounts, tx)
+	}
+
+	bc.accountBalances = balances
+	bc.accountNonces = nonces
+	bc.pendingOutboundTotals = pendingOutbound
+	bc.pendingNonceCounts = pendingNonceCounts
+}
+
+func (bc *Blockchain) RebuildState() {
+	bc.rebuildState()
+}
+
+func (bc *Blockchain) applyCommittedTransaction(balances, nonces map[string]int64, tx block.Transaction) {
+	if tx.Sender == "COINBASE" || tx.Sender == "FAUCET" {
+		balances[tx.Recipient] += tx.Amount
+		return
+	}
+	balances[tx.Sender] -= tx.Amount
+	balances[tx.Recipient] += tx.Amount
+	if tx.Nonce > nonces[tx.Sender] {
+		nonces[tx.Sender] = tx.Nonce
+	}
+}
+
+func (bc *Blockchain) applyPendingTransaction(pendingOutbound, pendingNonceCounts map[string]int64, tx block.Transaction) {
+	if tx.Sender == "COINBASE" || tx.Sender == "FAUCET" {
+		return
+	}
+	pendingOutbound[tx.Sender] += tx.Amount
+	pendingNonceCounts[tx.Sender]++
+}
+
+func (bc *Blockchain) removePendingTransaction(pendingOutbound, pendingNonceCounts map[string]int64, tx block.Transaction) {
+	if tx.Sender == "COINBASE" || tx.Sender == "FAUCET" {
+		return
+	}
+	if pendingOutbound[tx.Sender] >= tx.Amount {
+		pendingOutbound[tx.Sender] -= tx.Amount
+	} else {
+		pendingOutbound[tx.Sender] = 0
+	}
+	if pendingNonceCounts[tx.Sender] > 0 {
+		pendingNonceCounts[tx.Sender]--
+	}
+}
+
 // new new new
 
 func (bc *Blockchain) populateMerkleRoots() {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	for _, b := range bc.Blocks {
 		if b == nil {
 			continue
@@ -118,6 +211,8 @@ func (bc *Blockchain) populateMerkleRoots() {
 
 // GetBlocks returns deep copies of blocks to prevent modification (true immutability)
 func (bc *Blockchain) GetBlocks() []block.Block {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 	copies := make([]block.Block, len(bc.Blocks))
 	for i, b := range bc.Blocks {
 		copies[i] = *b // Create deep copies
@@ -127,6 +222,8 @@ func (bc *Blockchain) GetBlocks() []block.Block {
 
 // TamperBlockForTesting allows modifying blocks (for testing only)
 func (bc *Blockchain) TamperBlockForTesting(blockIndex int, modifyFunc func(*block.Block)) {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	if blockIndex < len(bc.Blocks) {
 		modifyFunc(bc.Blocks[blockIndex])
 	}
@@ -134,6 +231,8 @@ func (bc *Blockchain) TamperBlockForTesting(blockIndex int, modifyFunc func(*blo
 
 // ValidateBlockModification ensures blocks cannot be modified once committed
 func (bc *Blockchain) ValidateBlockModification(blockIndex int) error {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 	if blockIndex < len(bc.Blocks) && bc.Blocks[blockIndex].IsImmutable {
 		return errors.New("FORBIDDEN: This block is immutable and cannot be modified")
 	}
@@ -141,37 +240,83 @@ func (bc *Blockchain) ValidateBlockModification(blockIndex int) error {
 }
 
 func (bc *Blockchain) GetLatestBlock() *block.Block {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 	return bc.Blocks[len(bc.Blocks)-1]
 }
 
 func (bc *Blockchain) GetBalances() map[string]int64 {
-	balances := make(map[string]int64)
-
-	for _, b := range bc.Blocks {
-		for _, tx := range b.Transactions {
-			if tx.Sender != "COINBASE" && tx.Sender != "FAUCET" {
-				balances[tx.Sender] -= tx.Amount
-			}
-			balances[tx.Recipient] += tx.Amount
-		}
+	bc.rehydrate()
+	bc.mu.RLock()
+	if bc.accountBalances == nil {
+		bc.mu.RUnlock()
+		bc.rebuildState()
+		bc.mu.RLock()
 	}
-
+	balances := make(map[string]int64, len(bc.accountBalances))
+	for account, balance := range bc.accountBalances {
+		balances[account] = balance
+	}
+	bc.mu.RUnlock()
 	return balances
 }
 
 func (bc *Blockchain) GetBalance(account string) int64 {
-	balances := bc.GetBalances()
-	return balances[account]
+	bc.rehydrate()
+	bc.mu.RLock()
+	if bc.accountBalances == nil {
+		bc.mu.RUnlock()
+		bc.rebuildState()
+		bc.mu.RLock()
+	}
+	val := bc.accountBalances[account]
+	bc.mu.RUnlock()
+	return val
 }
 
 func (bc *Blockchain) PendingOutbound(account string) int64 {
-	total := int64(0)
-	for _, pendingTx := range bc.PendingTransactions {
-		if pendingTx.Sender == account {
-			total += pendingTx.Amount
-		}
+	bc.rehydrate()
+	bc.mu.RLock()
+	if bc.pendingOutboundTotals == nil {
+		bc.mu.RUnlock()
+		bc.rebuildState()
+		bc.mu.RLock()
 	}
-	return total
+	val := bc.pendingOutboundTotals[account]
+	bc.mu.RUnlock()
+	return val
+}
+
+func (bc *Blockchain) GetAccountNonce(account string) int64 {
+	bc.rehydrate()
+	bc.mu.RLock()
+	if bc.accountNonces == nil {
+		bc.mu.RUnlock()
+		bc.rebuildState()
+		bc.mu.RLock()
+	}
+	val := bc.accountNonces[account]
+	bc.mu.RUnlock()
+	return val
+}
+
+func (bc *Blockchain) GetPendingAccountNonce(account string) int64 {
+	bc.rehydrate()
+	bc.mu.RLock()
+	if bc.accountNonces == nil || bc.pendingNonceCounts == nil {
+		bc.mu.RUnlock()
+		bc.rebuildState()
+		bc.mu.RLock()
+	}
+	val := bc.accountNonces[account] + bc.pendingNonceCounts[account]
+	bc.mu.RUnlock()
+	return val
+}
+
+func (bc *Blockchain) GetPendingTransactionCount() int {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
+	return len(bc.PendingTransactions)
 }
 
 // func (bc *Blockchain) AddTransaction(tx block.Transaction) {
@@ -197,12 +342,30 @@ func (bc *Blockchain) ValidateTransaction(tx block.Transaction) error {
 		return errors.New("UNAUTHORIZED: Transaction must be signed with a valid public key and signature")
 	}
 
-	if tx.Sender != tx.PublicKey {
+	derivedAddress, err := wallet.AddressFromPublicKey(tx.PublicKey)
+	if err != nil {
+		return errors.New("UNAUTHORIZED: invalid public key")
+	}
+	if tx.Sender != derivedAddress {
 		return errors.New("UNAUTHORIZED: Sender address does not match the provided Public Key")
 	}
 
-	if !wallet.Verify(tx.PublicKey, tx.Payload(), tx.Signature) {
+	if !tx.VerifySignature() {
 		return errors.New("INVALID SIGNATURE: Transaction tampered or unauthorized")
+	}
+
+	if tx.Nonce <= 0 {
+		return errors.New("INVALID_NONCE: transaction nonce must be positive")
+	}
+
+	currentNonce := bc.GetAccountNonce(tx.Sender)
+	if tx.Nonce <= currentNonce {
+		return errors.New("INVALID_NONCE: transaction nonce already processed or outdated")
+	}
+
+	expectedNonce := bc.GetPendingAccountNonce(tx.Sender) + 1
+	if tx.Nonce != expectedNonce {
+		return fmt.Errorf("INVALID_NONCE: transaction nonce out of order, expected %d got %d", expectedNonce, tx.Nonce)
 	}
 
 	currentBalance := bc.GetBalance(tx.Sender)
@@ -215,11 +378,78 @@ func (bc *Blockchain) ValidateTransaction(tx block.Transaction) error {
 	return nil
 }
 
+func (bc *Blockchain) ValidateBlockTransactions(transactions []block.Transaction) error {
+	bc.rehydrate()
+	if bc.accountBalances == nil || bc.accountNonces == nil {
+		bc.rebuildState()
+	}
+
+	tempBalances := make(map[string]int64, len(bc.accountBalances))
+	for account, balance := range bc.accountBalances {
+		tempBalances[account] = balance
+	}
+	tempNonces := make(map[string]int64, len(bc.accountNonces))
+	for account, nonce := range bc.accountNonces {
+		tempNonces[account] = nonce
+	}
+
+	for _, tx := range transactions {
+		if tx.Amount <= 0 {
+			return errors.New("transaction amount must be positive")
+		}
+		if tx.Sender == "" || tx.Recipient == "" {
+			return errors.New("sender and recipient must not be empty")
+		}
+		if tx.Sender == "COINBASE" || tx.Sender == "FAUCET" {
+			tempBalances[tx.Recipient] += tx.Amount
+			continue
+		}
+		if tx.PublicKey == "" || tx.Signature == "" {
+			return errors.New("UNAUTHORIZED: Transaction must be signed with a valid public key and signature")
+		}
+		derivedAddress, err := wallet.AddressFromPublicKey(tx.PublicKey)
+		if err != nil {
+			return errors.New("UNAUTHORIZED: invalid public key")
+		}
+		if tx.Sender != derivedAddress {
+			return errors.New("UNAUTHORIZED: Sender address does not match the provided Public Key")
+		}
+		if !tx.VerifySignature() {
+			return errors.New("INVALID SIGNATURE: Transaction tampered or unauthorized")
+		}
+		if tx.Nonce <= 0 {
+			return errors.New("INVALID_NONCE: transaction nonce must be positive")
+		}
+
+		currentNonce := tempNonces[tx.Sender]
+		if tx.Nonce <= currentNonce {
+			return errors.New("INVALID_NONCE: transaction nonce already processed or outdated")
+		}
+		expectedNonce := currentNonce + 1
+		if tx.Nonce != expectedNonce {
+			return fmt.Errorf("INVALID_NONCE: transaction nonce out of order, expected %d got %d", expectedNonce, tx.Nonce)
+		}
+
+		if tempBalances[tx.Sender] < tx.Amount {
+			return errors.New("insufficient balance: sender does not have enough funds")
+		}
+
+		tempBalances[tx.Sender] -= tx.Amount
+		tempBalances[tx.Recipient] += tx.Amount
+		tempNonces[tx.Sender] = tx.Nonce
+	}
+
+	return nil
+}
+
 func (bc *Blockchain) AddTransaction(tx block.Transaction) error {
 	if err := bc.ValidateTransaction(tx); err != nil {
 		return err
 	}
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	bc.PendingTransactions = append(bc.PendingTransactions, tx)
+	bc.applyPendingTransaction(bc.pendingOutboundTotals, bc.pendingNonceCounts, tx)
 	return nil
 }
 
@@ -227,6 +457,8 @@ func (bc *Blockchain) AddTransaction(tx block.Transaction) error {
 
 func (bc *Blockchain) RegisterMiner(address string) error {
 	bc.rehydrate()
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	if err := bc.MinerRegistry.Register(address); err != nil {
 		return err
 	}
@@ -237,6 +469,8 @@ func (bc *Blockchain) RegisterMiner(address string) error {
 
 func (bc *Blockchain) IsMinerRegistered(address string) bool {
 	bc.rehydrate()
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 	if bc.MinerRegistry == nil {
 		return false
 	}
@@ -245,6 +479,8 @@ func (bc *Blockchain) IsMinerRegistered(address string) bool {
 
 func (bc *Blockchain) RegisteredMiners() []string {
 	bc.rehydrate()
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 	if bc.MinerRegistry == nil {
 		return []string{}
 	}
@@ -255,31 +491,29 @@ func (bc *Blockchain) RegisteredMiners() []string {
 
 func (bc *Blockchain) MinePendingTransactions(maxBlockSize int) (*block.Block, error) {
 	bc.rehydrate()
+
+	// Snapshot pending transactions and latest block without holding the write lock
+	bc.mu.RLock()
 	if len(bc.PendingTransactions) == 0 {
+		bc.mu.RUnlock()
 		return nil, errors.New("no pending transactions to mine")
 	}
 	txCount := len(bc.PendingTransactions)
 	if txCount > maxBlockSize {
 		txCount = maxBlockSize
 	}
-
-	transactionsToMine := bc.PendingTransactions[:txCount]
-
-	latestBlock := bc.GetLatestBlock()
-
-	//new
-
+	transactionsToMine := make([]block.Transaction, txCount)
+	copy(transactionsToMine, bc.PendingTransactions[:txCount])
+	latestBlock := *bc.Blocks[len(bc.Blocks)-1]
 	selectedMiner := bc.MinerAddress
+	minerWorkers := bc.MinerWorkers
+	minerTimeout := bc.MinerTimeout
+	bc.mu.RUnlock()
+
 	if selectedMiner == "" {
 		registeredMiners := bc.RegisteredMiners()
 		if len(registeredMiners) > 0 {
 			selectedMiner = registeredMiners[0]
-			bc.MinerAddress = selectedMiner
-		}
-	} else if !bc.IsMinerRegistered(selectedMiner) {
-		registeredMiners := bc.RegisteredMiners()
-		if len(registeredMiners) > 0 {
-			return nil, errors.New("miner address is not registered")
 		}
 	}
 
@@ -310,9 +544,13 @@ func (bc *Blockchain) MinePendingTransactions(maxBlockSize int) (*block.Block, e
 		Difficulty:   nextDifficulty,
 	}
 	targetPrefix := strings.Repeat("0", nextDifficulty)
-	workerCount := bc.MinerWorkers
+	workerCount := minerWorkers
 	if workerCount <= 0 {
 		workerCount = determineMiningWorkers()
+	}
+	// use minerTimeout if set
+	if minerTimeout > 0 {
+		bc.MinerTimeout = minerTimeout
 	}
 	minedBlock, _, err := bc.mineBlockConcurrent(newBlock, targetPrefix, workerCount)
 	if err != nil {
@@ -320,8 +558,20 @@ func (bc *Blockchain) MinePendingTransactions(maxBlockSize int) (*block.Block, e
 	}
 
 	minedBlock.Transactions = rewardedTransactions
+	minedBlock.MerkleRootValue = minedBlock.MerkleRoot()
 	minedBlock.IsImmutable = true
+
+	// Commit results while holding write lock
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	bc.Blocks = append(bc.Blocks, minedBlock)
+	for _, tx := range transactionsToMine {
+		bc.removePendingTransaction(bc.pendingOutboundTotals, bc.pendingNonceCounts, tx)
+		bc.applyCommittedTransaction(bc.accountBalances, bc.accountNonces, tx)
+	}
+	if selectedMiner != "" {
+		bc.applyCommittedTransaction(bc.accountBalances, bc.accountNonces, coinbaseTx)
+	}
 	bc.PendingTransactions = bc.PendingTransactions[txCount:]
 	_ = reward
 	return minedBlock, nil
@@ -517,33 +767,40 @@ func (bc *Blockchain) mineBlockConcurrent(template *block.Block, targetPrefix st
 
 	select {
 	case res := <-results:
+		totalAttempts := atomic.LoadInt64(&attempts)
 		if res.err != nil {
-			return nil, attempts, res.err
+			return nil, totalAttempts, res.err
 		}
-		return res.block, attempts, nil
+		return res.block, totalAttempts, nil
 	case <-ctx.Done():
 		// if a worker just found a result around the same time as ctx.Done,
 		// try to read it before returning to avoid missing a valid result.
 		select {
 		case res := <-results:
+			totalAttempts := atomic.LoadInt64(&attempts)
 			if res.err != nil {
-				return nil, attempts, res.err
+				return nil, totalAttempts, res.err
 			}
-			return res.block, attempts, nil
+			return res.block, totalAttempts, nil
 		default:
 		}
 
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, attempts, fmt.Errorf("mining timed out: %w", ctx.Err())
+			totalAttempts := atomic.LoadInt64(&attempts)
+			return nil, totalAttempts, fmt.Errorf("mining timed out: %w", ctx.Err())
 		}
 
-		return nil, attempts, fmt.Errorf("mining cancelled")
+		totalAttempts := atomic.LoadInt64(&attempts)
+		return nil, totalAttempts, fmt.Errorf("mining cancelled")
 	}
 }
 
 // new
 
 func (bc *Blockchain) IsValid() (bool, int) {
+
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 
 	if len(bc.Blocks) > 0 {
 		genesisBlock := bc.Blocks[0]
@@ -567,6 +824,12 @@ func (bc *Blockchain) IsValid() (bool, int) {
 	for i := 1; i < len(bc.Blocks); i++ {
 		current := bc.Blocks[i]
 		previous := bc.Blocks[i-1]
+
+		// 1. Transactions වලින් Merkle Root එක ගණනය කර Save කර ඇති අගය සමඟ සැසඳීම:
+		recalculatedMerkle := current.MerkleRoot()
+		if current.MerkleRootValue != recalculatedMerkle {
+			return false, current.Index
+		}
 
 		if current.Hash != current.CalculateHash() {
 			return false, current.Index

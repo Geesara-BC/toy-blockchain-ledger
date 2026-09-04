@@ -80,7 +80,11 @@ func TestTamperedChainDetection(t *testing.T) {
 	bc.MinePendingTransactions(5)
 
 	priv, pub, _ := wallet.GenerateKeyPair()
-	tx := block.Transaction{Sender: pub, Recipient: "Bob", Amount: 20, PublicKey: pub}
+	addr, err := wallet.AddressFromPublicKey(pub)
+	if err != nil {
+		t.Fatalf("failed to derive address: %v", err)
+	}
+	tx := block.Transaction{Sender: addr, Recipient: "Bob", Amount: 20, Nonce: 1, PublicKey: pub}
 	sig, _ := wallet.Sign(priv, tx.Payload())
 	tx.Signature = sig
 
@@ -213,5 +217,41 @@ func TestReplaceWithLongestChainRejectsShorterOrInvalidFork(t *testing.T) {
 	invalidFork.Blocks[1].Hash = invalidFork.Blocks[1].CalculateHash()
 	if err := mainChain.ReplaceWithLongestChain(invalidFork); !errors.Is(err, ErrInvalidChain) && err == nil {
 		t.Fatalf("expected invalid chain error, got %v", err)
+	}
+}
+
+func TestReplayTransactionWithOldNonceRejected(t *testing.T) {
+	bc := NewBlockchain(1)
+	priv, pub, _ := wallet.GenerateKeyPair()
+	addr, err := wallet.AddressFromPublicKey(pub)
+	if err != nil {
+		t.Fatalf("failed to derive address: %v", err)
+	}
+
+	if err := bc.AddTransaction(block.Transaction{Sender: "FAUCET", Recipient: addr, Amount: 100}); err != nil {
+		t.Fatalf("faucet transaction failed: %v", err)
+	}
+	if _, err := bc.MinePendingTransactions(5); err != nil {
+		t.Fatalf("mining failed: %v", err)
+	}
+
+	tx := block.Transaction{Sender: addr, Recipient: "Bob", Amount: 10, Nonce: 1, PublicKey: pub}
+	sig, _ := wallet.Sign(priv, tx.Payload())
+	tx.Signature = sig
+	if err := bc.AddTransaction(tx); err != nil {
+		t.Fatalf("expected first nonce to be accepted, got %v", err)
+	}
+	if _, err := bc.MinePendingTransactions(5); err != nil {
+		t.Fatalf("mining first nonce failed: %v", err)
+	}
+
+	replay := block.Transaction{Sender: addr, Recipient: "Bob", Amount: 10, Nonce: 1, PublicKey: pub}
+	replaySig, _ := wallet.Sign(priv, replay.Payload())
+	replay.Signature = replaySig
+
+	if err := bc.AddTransaction(replay); err == nil {
+		t.Fatalf("expected replayed nonce to be rejected")
+	} else if err.Error() != "INVALID_NONCE: transaction nonce already processed or outdated" {
+		t.Fatalf("unexpected replay error: %v", err)
 	}
 }

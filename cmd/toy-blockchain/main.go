@@ -27,6 +27,7 @@ func main() {
 	}
 
 	dbPath := flag.String("db-path", defaultDbPath, "File path for the blockchain database")
+	nodeAddr := flag.String("node-addr", "", "Optional HTTP address of a running node (e.g. http://localhost:3001)")
 	difficulty := flag.Int("difficulty", 3, "Mining difficulty (number of leading zeroes)")
 	maxBlockSize := flag.Int("max-block-size", 5, "Maximum transactions per block")
 	miningWorkers := flag.Int("mining-workers", 4, "Number of goroutines used for concurrent mining")
@@ -55,6 +56,6 @@ func main() {
 		return
 	}
 
-	c := cli.NewCLI(*dbPath, *difficulty, *maxBlockSize, *miningWorkers, 10*time.Second, *difficultyRetargetInterval, *expectedBlockTimeSeconds)
+	c := cli.NewCLI(*dbPath, *difficulty, *maxBlockSize, *miningWorkers, 10*time.Second, *difficultyRetargetInterval, *expectedBlockTimeSeconds, *nodeAddr)
 	c.Run()
 }

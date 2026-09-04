@@ -2,6 +2,7 @@ package wallet
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 )
@@ -45,4 +46,16 @@ func Verify(pubKeyHex string, message string, sigHex string) bool {
 	}
 	pubKey := ed25519.PublicKey(pubBytes)
 	return ed25519.Verify(pubKey, []byte(message), sigBytes)
+}
+
+// AddressFromPublicKey derives a stable on-chain address from a public key.
+// This keeps the sender identifier separate from the raw public key while
+// still allowing every node to verify the signature with the provided key.
+func AddressFromPublicKey(pubKeyHex string) (string, error) {
+	pubBytes, err := hex.DecodeString(pubKeyHex)
+	if err != nil || len(pubBytes) != ed25519.PublicKeySize {
+		return "", errors.New("invalid public key")
+	}
+	hash := sha256.Sum256(pubBytes)
+	return hex.EncodeToString(hash[:]), nil
 }

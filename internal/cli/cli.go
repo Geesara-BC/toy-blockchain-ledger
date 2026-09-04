@@ -1,10 +1,14 @@
 package cli
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"toy-blockchain/internal/block"
@@ -34,10 +38,12 @@ type CLI struct {
 	minerTimeout               time.Duration
 	difficultyRetargetInterval int
 	expectedBlockTimeSeconds   int
+	nodeAddr                   string
+	httpClient                 *http.Client
 }
 
-func NewCLI(dbFile string, difficulty int, maxBlockSize int, minerWorkers int, minerTimeout time.Duration, difficultyRetargetInterval int, expectedBlockTimeSeconds int) *CLI {
-	return &CLI{
+func NewCLI(dbFile string, difficulty int, maxBlockSize int, minerWorkers int, minerTimeout time.Duration, difficultyRetargetInterval int, expectedBlockTimeSeconds int, nodeAddr string) *CLI {
+	cli := &CLI{
 		dbFile:                     dbFile,
 		difficulty:                 difficulty,
 		maxBlockSize:               maxBlockSize,
@@ -45,10 +51,19 @@ func NewCLI(dbFile string, difficulty int, maxBlockSize int, minerWorkers int, m
 		minerTimeout:               minerTimeout,
 		difficultyRetargetInterval: difficultyRetargetInterval,
 		expectedBlockTimeSeconds:   expectedBlockTimeSeconds,
+		nodeAddr:                   strings.TrimRight(nodeAddr, "/"),
 	}
+	if cli.nodeAddr != "" {
+		cli.httpClient = &http.Client{Timeout: 5 * time.Second}
+	}
+	return cli
 }
 
 func (cli *CLI) Run() {
+	if cli.nodeAddr != "" {
+		cli.runHTTPLoop()
+		return
+	}
 	var bc *chain.Blockchain
 	var err error
 
@@ -127,21 +142,6 @@ func (cli *CLI) Run() {
 
 			addressBook[normalizedName] = pubKey
 			privateKeys[normalizedName] = privKey
-
-			// new
-
-			fmt.Print("Register this wallet as a miner? (y/n): ")
-			var registerChoice string
-			fmt.Scanln(&registerChoice)
-			if strings.EqualFold(registerChoice, "y") || strings.EqualFold(registerChoice, "yes") {
-				if err := bc.RegisterMiner(pubKey); err != nil {
-					fmt.Printf(Red+"Failed to register miner: %v\n"+Reset, err)
-				} else {
-					fmt.Printf(Green+"SUCCESS! Wallet '%s' registered as a miner.\n"+Reset, name)
-				}
-			}
-
-			// new
 
 			saveWallets(addressBook, privateKeys, cli.dbFile)
 
@@ -225,10 +225,12 @@ func (cli *CLI) Run() {
 				cli.waitForUser()
 				continue
 			}
+			senderAddr := mustAddressFromPublicKey(pubKeyFrom)
 			tx := block.Transaction{
-				Sender:    pubKeyFrom,
+				Sender:    senderAddr,
 				Recipient: pubKeyTo,
 				Amount:    amount,
+				Nonce:     bc.GetPendingAccountNonce(senderAddr) + 1,
 				PublicKey: pubKeyFrom,
 			}
 
@@ -424,6 +426,301 @@ func (cli *CLI) Run() {
 	}
 }
 
+func (cli *CLI) runHTTPLoop() {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		// fetch status to get pending tx count for menu
+		var st map[string]interface{}
+		pending := 0
+		if err := cli.getJSON("/status", &st); err == nil {
+			if m, ok := st["mempool"].(float64); ok {
+				pending = int(m)
+			}
+		}
+		cli.printMenu(pending)
+		fmt.Print("Choose an option: ")
+		line, _ := reader.ReadString('\n')
+		choice := strings.TrimSpace(line)
+		switch choice {
+		case "1":
+			fmt.Print("Wallet name: ")
+			name, _ := reader.ReadString('\n')
+			name = strings.TrimSpace(name)
+			body := map[string]string{"name": name}
+			var resp map[string]interface{}
+			if err := cli.postJSON("/wallet", body, &resp); err != nil {
+				fmt.Println("error:", err)
+			} else {
+				b, _ := json.MarshalIndent(resp, "", "  ")
+				fmt.Println(string(b))
+			}
+		case "2":
+			// fetch wallets to pick recipient
+			var store map[string]interface{}
+			if err := cli.getJSON("/wallet", &store); err != nil {
+				fmt.Println("error listing wallets:", err)
+				break
+			}
+			addresses := map[string]string{}
+			if ab, ok := store["address_book"].(map[string]interface{}); ok {
+				for k, v := range ab {
+					if s, ok := v.(string); ok {
+						addresses[k] = s
+					}
+				}
+			}
+			fmt.Println("Available wallets:")
+			for n := range addresses {
+				fmt.Println(" -", n)
+			}
+			fmt.Print("Recipient name: ")
+			to, _ := reader.ReadString('\n')
+			to = strings.TrimSpace(to)
+			pub, ok := addresses[to]
+			if !ok {
+				fmt.Println("unknown recipient")
+				break
+			}
+			fmt.Print("Amount: ")
+			amtLine, _ := reader.ReadString('\n')
+			amtLine = strings.TrimSpace(amtLine)
+			amt, _ := strconv.ParseInt(amtLine, 10, 64)
+			// address_book now stores derived on-chain addresses directly
+			recipientAddr := pub
+			tx := map[string]interface{}{
+				"sender":     "FAUCET",
+				"recipient":  recipientAddr,
+				"amount":     amt,
+				"fee":        0,
+				"nonce":      0,
+				"public_key": "SYSTEM_FAUCET_PUBLIC_KEY",
+				"signature":  "SYSTEM_AUTHORIZED_NO_SIGNATURE",
+			}
+			if err := cli.postJSON("/tx", tx, nil); err != nil {
+				fmt.Println("error submitting faucet tx:", err)
+			} else {
+				fmt.Println("faucet tx submitted")
+			}
+		case "3":
+			// send coins using saved private key on node
+			var store map[string]interface{}
+			if err := cli.getJSON("/wallet", &store); err != nil {
+				fmt.Println("error listing wallets:", err)
+				break
+			}
+			addresses := map[string]string{}
+			privs := map[string]string{}
+			if ab, ok := store["address_book"].(map[string]interface{}); ok {
+				for k, v := range ab {
+					if s, ok := v.(string); ok {
+						addresses[k] = s
+					}
+				}
+			}
+			if pk, ok := store["private_keys"].(map[string]interface{}); ok {
+				for k, v := range pk {
+					if s, ok := v.(string); ok {
+						privs[k] = s
+					}
+				}
+			}
+			fmt.Println("Available wallets:")
+			for n := range addresses {
+				fmt.Println(" -", n)
+			}
+			fmt.Print("From (name): ")
+			from, _ := reader.ReadString('\n')
+			from = strings.TrimSpace(from)
+			// address_book stores addresses; privs stores private keys
+			senderAddr, ok1 := addresses[from]
+			privFrom, ok2 := privs[from]
+			if !ok1 || !ok2 {
+				fmt.Println("unknown sender or missing private key")
+				break
+			}
+			fmt.Print("To (name): ")
+			to, _ := reader.ReadString('\n')
+			to = strings.TrimSpace(to)
+			recipientAddr, ok := addresses[to]
+			if !ok {
+				fmt.Println("unknown recipient")
+				break
+			}
+			fmt.Print("Amount: ")
+			amtLine, _ := reader.ReadString('\n')
+			amtLine = strings.TrimSpace(amtLine)
+			amt, _ := strconv.ParseInt(amtLine, 10, 64)
+			// determine nonce automatically from node
+			// senderAddr is stored in address_book
+			var nn struct {
+				NextNonce int64 `json:"next_nonce"`
+			}
+			if err := cli.getJSON("/nonce/"+senderAddr, &nn); err != nil {
+				fmt.Println("warning: could not fetch nonce from node, defaulting to 1:", err)
+			}
+			nonce := nn.NextNonce
+			if nonce == 0 {
+				nonce = 1
+			}
+			// derive public key from private key for inclusion in the tx
+			pubHex, err := wallet.GetPublicKey(privFrom)
+			if err != nil {
+				fmt.Println("invalid private key for signing:", err)
+				break
+			}
+			txObj := block.Transaction{
+				Sender:    senderAddr,
+				Recipient: recipientAddr,
+				Amount:    amt,
+				Fee:       0,
+				Nonce:     nonce,
+				PublicKey: pubHex,
+			}
+			sig, err := wallet.Sign(privFrom, txObj.Payload())
+			if err != nil {
+				fmt.Println("sign error:", err)
+				break
+			}
+			txObj.Signature = sig
+			if err := cli.postJSON("/tx", txObj, nil); err != nil {
+				fmt.Println("error submitting tx:", err)
+			} else {
+				fmt.Println("tx submitted")
+			}
+		case "4":
+			var resp map[string]interface{}
+			if err := cli.postJSON("/mine", map[string]int{"max_block_size": 10}, &resp); err != nil {
+				fmt.Println("mine error:", err)
+			} else {
+				fmt.Println("mined:")
+				b, _ := json.MarshalIndent(resp, "", "  ")
+				fmt.Println(string(b))
+			}
+		case "5":
+			var balances map[string]int64
+			if err := cli.getJSON("/balances", &balances); err != nil {
+				fmt.Println("error:", err)
+			} else {
+				b, _ := json.MarshalIndent(balances, "", "  ")
+				fmt.Println(string(b))
+			}
+		case "6":
+			var stat map[string]interface{}
+			if err := cli.getJSON("/sync/height", &stat); err != nil {
+				fmt.Println("error:", err)
+				break
+			}
+			height := int(stat["height"].(float64))
+			fmt.Printf("chain height: %d\n", height)
+			for i := 0; i <= height; i++ {
+				var b block.Block
+				if err := cli.getJSON(fmt.Sprintf("/sync/block/%d", i), &b); err != nil {
+					fmt.Println("error fetching block", i, err)
+					break
+				}
+				blockColor := Cyan
+				if b.Index == 0 {
+					blockColor = Purple
+				}
+				fmt.Printf("%sBlock #%d %s\n", blockColor, b.Index, Reset)
+				fmt.Printf("  Hash: %s%s%s\n", Green, b.Hash, Reset)
+				fmt.Printf("  Prev Hash: %s%s%s\n", Yellow, b.PreviousHash, Reset)
+				fmt.Printf("  Merkle Root: %s%s%s\n", Cyan, (&b).MerkleRoot(), Reset)
+				fmt.Printf("  Nonce: %d | Tx Count: %d\n", b.Nonce, len(b.Transactions))
+				fmt.Println("  Transactions:")
+				if len(b.Transactions) == 0 {
+					fmt.Println("      [Genesis Block - System Initialized]")
+				}
+				for _, tx := range b.Transactions {
+					fmt.Printf("      [%s -> %s : %.2f Coins]\n", tx.Sender, tx.Recipient, float64(tx.Amount))
+				}
+				fmt.Println(strings.Repeat("-", 50))
+			}
+		case "7":
+			var vr map[string]interface{}
+			if err := cli.getJSON("/verify", &vr); err != nil {
+				fmt.Println("error:", err)
+				break
+			}
+			valid := vr["valid"].(bool)
+			faulty := int(vr["faulty_index"].(float64))
+			if valid {
+				fmt.Println(Green + "VALID: Blockchain integrity intact. All cryptographic links secure!" + Reset)
+			} else {
+				fmt.Printf(Red+"CORRUPTED: Validation failed at Block #%d!"+Reset+"\n", faulty)
+			}
+		case "8":
+			var stat map[string]interface{}
+			if err := cli.getJSON("/status", &stat); err != nil {
+				fmt.Println("error:", err)
+			} else {
+				b, _ := json.MarshalIndent(stat, "", "  ")
+				fmt.Println(string(b))
+			}
+		case "9":
+			return
+		default:
+			fmt.Println("unknown option")
+		}
+	}
+}
+
+func (cli *CLI) postJSON(path string, v interface{}, out interface{}) error {
+	url := cli.nodeAddr + path
+	data, _ := json.Marshal(v)
+	resp, err := cli.httpClient.Post(url, "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		// Try to decode JSON error object {"error": "..."}
+		var serr map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&serr); err == nil {
+			if em, ok := serr["error"].(string); ok && strings.TrimSpace(em) != "" {
+				return fmt.Errorf("http %d: %s", resp.StatusCode, em)
+			}
+		}
+		// read remaining bytes
+		if b, err := io.ReadAll(resp.Body); err == nil {
+			body := strings.TrimSpace(string(b))
+			if body != "" {
+				return fmt.Errorf("http %d: %s", resp.StatusCode, body)
+			}
+		}
+		return fmt.Errorf("http %d", resp.StatusCode)
+	}
+	if out != nil {
+		return json.NewDecoder(resp.Body).Decode(out)
+	}
+	return nil
+}
+
+func (cli *CLI) getJSON(path string, out interface{}) error {
+	url := cli.nodeAddr + path
+	resp, err := cli.httpClient.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		var serr map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&serr); err == nil {
+			if em, ok := serr["error"].(string); ok && strings.TrimSpace(em) != "" {
+				return fmt.Errorf("http %d: %s", resp.StatusCode, em)
+			}
+		}
+		if b, err := io.ReadAll(resp.Body); err == nil {
+			body := strings.TrimSpace(string(b))
+			if body != "" {
+				return fmt.Errorf("http %d: %s", resp.StatusCode, body)
+			}
+		}
+		return fmt.Errorf("http %d", resp.StatusCode)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
 func (cli *CLI) printHeader() {
 	fmt.Print("\033[H\033[2J")
 	fmt.Println(Cyan + Bold + `
@@ -480,6 +777,14 @@ func resolveWalletName(addressBook map[string]string, name string) (string, bool
 	return "", false
 }
 
+func mustAddressFromPublicKey(pubKey string) string {
+	address, err := wallet.AddressFromPublicKey(pubKey)
+	if err != nil {
+		return pubKey
+	}
+	return address
+}
+
 func loadWallets(dbFile string) (map[string]string, map[string]string) {
 	walletPath := walletStorePath(dbFile)
 	data, err := os.ReadFile(walletPath)
@@ -524,7 +829,7 @@ func saveWallets(addresses, privates map[string]string, dbFile string) {
 	store := WalletStore{AddressBook: addresses, PrivateKeys: privates}
 	data, _ := json.MarshalIndent(store, "", "  ")
 	walletPath := walletStorePath(dbFile)
-	if err := os.MkdirAll(filepath.Dir(walletPath), 0o755); err == nil {
+	if err := os.MkdirAll(filepath.Dir(walletPath), 0755); err == nil {
 		_ = os.WriteFile(walletPath, data, 0644)
 	}
 }
