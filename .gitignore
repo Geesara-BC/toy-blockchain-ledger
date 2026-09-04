@@ -8,3 +8,5 @@ data/node3/blockchain.json
 data/node1/keystore.json
 data/node2/keystore.json
 data/node3/keystore.json
+bin/*
+!bin/.gitkeep
